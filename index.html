@@ -2,423 +2,368 @@
 <html lang="bg" class="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Умен Измервател & Дигитален Нивелир</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>AR Умен Измервател (AR Measure & Level)</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
   <style>
-    /* Prevent default browser pull-to-refresh and zooming while measuring */
-    body {
+    * {
+      -webkit-tap-highlight-color: transparent;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
       touch-action: none;
-      -webkit-touch-callout: none;
       user-select: none;
+      -webkit-user-select: none;
+      background-color: #000000;
     }
-    .custom-scroll::-webkit-scrollbar {
-      height: 4px;
-      width: 4px;
+    /* Pulsing reticle */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.1); opacity: 0.4; }
+      100% { transform: scale(0.95); opacity: 0.8; }
     }
-    .custom-scroll::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 4px;
-    }
-    /* Grid background */
-    .blueprint-grid {
-      background-size: 20px 20px;
-      background-image: 
-        linear-gradient(to right, rgba(59, 130, 246, 0.08) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(59, 130, 246, 0.08) 1px, transparent 1px);
+    .pulse-animation {
+      animation: pulse-ring 2s infinite ease-in-out;
     }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans overflow-hidden">
+<body class="bg-black text-white font-sans flex flex-col justify-between">
 
-  <!-- Top App Navigation & Status Header -->
-  <header class="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-3 py-2 flex items-center justify-between z-30 shrink-0">
-    <div class="flex items-center gap-2">
-      <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
-        📐
-      </div>
+  <!-- 1. FULLSCREEN CAMERA FEED -->
+  <video id="arVideo" autoplay playsinline webkit-playsinline muted class="absolute inset-0 w-full h-full object-cover z-0"></video>
+
+  <!-- 2. AR MEASUREMENT & DRAWING CANVAS OVERLAY -->
+  <canvas id="arCanvas" class="absolute inset-0 w-full h-full z-10 pointer-events-auto"></canvas>
+
+  <!-- 3. CENTER AR RETICLE (МЕРНИК КАТО В APPLE / GOOGLE MEASURE) -->
+  <div id="centerReticle" class="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+    <div class="relative w-16 h-16 flex items-center justify-center">
+      <!-- Outer target ring -->
+      <div class="absolute inset-0 rounded-full border-2 border-white/80 pulse-animation"></div>
+      <div class="absolute w-8 h-8 rounded-full border border-blue-400"></div>
+      <!-- Center dot -->
+      <div class="w-2.5 h-2.5 bg-blue-500 rounded-full shadow-lg shadow-blue-500/80 ring-2 ring-white"></div>
+      <!-- Crosshairs -->
+      <div class="absolute w-full h-[1px] bg-white/40"></div>
+      <div class="absolute h-full w-[1px] bg-white/40"></div>
+    </div>
+  </div>
+
+  <!-- 4. TOP HUD BAR (Мерни единици, статус, калибрация) -->
+  <header class="relative z-30 pt-safe px-4 py-3 flex items-center justify-between pointer-events-none">
+    <!-- Mode & Status Indicator -->
+    <div class="pointer-events-auto bg-black/60 backdrop-blur-md border border-white/10 rounded-2xl px-3 py-1.5 flex items-center gap-2 shadow-lg">
+      <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
       <div>
-        <h1 class="text-sm font-semibold tracking-wide flex items-center gap-2">
-          Умен Измервател
-          <span id="activeModeBadge" class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/30">Линия</span>
-        </h1>
-        <p class="text-[10px] text-slate-400" id="statusMessage">Докоснете екрана, за да поставите точка</p>
+        <div class="text-[10px] uppercase font-bold tracking-wider text-slate-400" id="hudModeLabel">AR Отсечка</div>
+        <div class="text-xs font-semibold text-white" id="hudStatus">Насочете към точка А</div>
       </div>
     </div>
 
-    <!-- Quick Action Buttons -->
-    <div class="flex items-center gap-1.5">
-      <!-- Unit Selector -->
-      <select id="unitSelector" class="bg-slate-800 border border-slate-700 text-xs rounded-md px-2 py-1 text-slate-200 focus:outline-none focus:border-blue-500">
+    <!-- Right Controls: Unit selector & Clear -->
+    <div class="pointer-events-auto flex items-center gap-2">
+      <!-- Unit selector -->
+      <select id="unitSelector" class="bg-black/60 backdrop-blur-md border border-white/15 text-xs text-white font-mono rounded-xl px-2.5 py-1.5 focus:outline-none">
         <option value="cm">cm</option>
         <option value="mm">mm</option>
         <option value="m">m</option>
-        <option value="in">in (инч)</option>
-        <option value="px">px (пиксели)</option>
+        <option value="in">in</option>
       </select>
 
-      <!-- Clear All -->
-      <button id="btnClear" title="Изчисти всичко" class="p-1.5 rounded-md bg-slate-800 hover:bg-rose-950/60 hover:text-rose-400 border border-slate-700 transition">
+      <!-- Clear Button -->
+      <button id="btnClear" class="bg-black/60 backdrop-blur-md border border-white/15 text-white/80 hover:text-rose-400 p-2 rounded-xl transition shadow-lg" title="Изчисти">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-      </button>
-
-      <!-- Undo -->
-      <button id="btnUndo" title="Назад" class="p-1.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
       </button>
     </div>
   </header>
 
-  <!-- Horizontal Tool Mode Selector -->
-  <nav class="bg-slate-900 border-b border-slate-800 px-2 py-1.5 flex gap-1.5 overflow-x-auto custom-scroll shrink-0 z-20">
-    <button data-mode="line" class="tool-btn active-tool flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm">
-      <span>📏</span> Отсечка
-    </button>
-    <button data-mode="polyline" class="tool-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 whitespace-nowrap">
-      <span>〰️</span> Път (Полилиния)
-    </button>
-    <button data-mode="angle" class="tool-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 whitespace-nowrap">
-      <span>📐</span> Ъгъл (3 точки)
-    </button>
-    <button data-mode="polygon" class="tool-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 whitespace-nowrap">
-      <span>⬡</span> Площ (Полигон)
-    </button>
-    <button data-mode="level" class="tool-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 whitespace-nowrap">
-      <span>⚖️</span> Нивелир
-    </button>
-    <button data-mode="clinometer" class="tool-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 whitespace-nowrap">
-      <span>🌲</span> Височина (Клинометър)
-    </button>
-    <button data-mode="calibrate" class="tool-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-600/20 text-amber-300 border border-amber-500/30 hover:bg-amber-600/30 whitespace-nowrap">
-      <span>🎯</span> Калибрация
-    </button>
-  </nav>
-
-  <!-- Main Viewport Area -->
-  <main class="relative flex-1 bg-black overflow-hidden flex items-center justify-center">
-
-    <!-- Video feed for Camera -->
-    <video id="cameraVideo" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover hidden"></video>
-
-    <!-- Uploaded Image (if any) -->
-    <img id="referenceImage" class="absolute inset-0 w-full h-full object-contain pointer-events-none hidden" alt="Background" />
-
-    <!-- Grid Canvas Background -->
-    <div id="gridBackground" class="absolute inset-0 blueprint-grid pointer-events-none"></div>
-
-    <!-- Interactive Measurement Canvas -->
-    <canvas id="measuringCanvas" class="absolute inset-0 w-full h-full cursor-crosshair z-10"></canvas>
-
-    <!-- Magnifier / Loupe (for ultra-precise touch placement) -->
-    <div id="magnifier" class="absolute top-4 left-4 w-28 h-28 rounded-full border-2 border-blue-400 bg-slate-900 shadow-2xl pointer-events-none hidden z-30 overflow-hidden ring-4 ring-black/50">
-      <canvas id="magnifierCanvas" class="w-full h-full"></canvas>
-      <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div class="w-2 h-2 rounded-full border-2 border-red-500 bg-red-500/40"></div>
-        <div class="absolute w-full h-[1px] bg-red-500/40"></div>
-        <div class="absolute h-full w-[1px] bg-red-500/40"></div>
-      </div>
+  <!-- 5. FLOATING LIVE MEASUREMENT READOUT (Център-горе) -->
+  <div class="relative z-30 flex justify-center pointer-events-none px-4">
+    <div id="liveResultBadge" class="bg-black/75 backdrop-blur-lg border border-white/20 rounded-2xl px-5 py-2.5 shadow-2xl flex items-baseline gap-2 pointer-events-auto">
+      <span class="text-xs text-slate-400 uppercase font-semibold">Разстояние:</span>
+      <span id="liveResultNumber" class="text-2xl font-mono font-black text-blue-400">0.0</span>
+      <span id="liveResultUnit" class="text-sm font-semibold text-slate-300">cm</span>
     </div>
+  </div>
 
-    <!-- Live Measuring Readout Overlay (Floating pill) -->
-    <div id="liveMeasurementCard" class="absolute top-4 right-4 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-xl px-4 py-2.5 shadow-2xl z-20 pointer-events-none flex flex-col gap-1 min-w-[140px]">
-      <span class="text-[10px] uppercase font-bold tracking-wider text-slate-400" id="readoutTitle">Резултат</span>
-      <div class="text-xl font-mono font-bold text-blue-400 flex items-baseline gap-1" id="readoutValue">
-        <span>0.00</span>
-        <span class="text-xs text-slate-400" id="readoutUnit">cm</span>
-      </div>
-      <div class="text-[11px] text-slate-400 font-mono" id="readoutSubtext">Готов за измерване</div>
+  <!-- 6. AR HORIZON / LEVEL OVERLAY (Ако е включен режим Нивелир) -->
+  <div id="arLevelOverlay" class="absolute inset-0 flex items-center justify-center pointer-events-none z-20 hidden">
+    <!-- Artificial Horizon Line -->
+    <div id="arHorizonLine" class="w-48 h-[2px] bg-emerald-400 shadow-lg shadow-emerald-400/50 transition-transform duration-75 flex items-center justify-between">
+      <div class="w-2 h-4 border-l-2 border-emerald-400"></div>
+      <div class="w-2 h-4 border-r-2 border-emerald-400"></div>
     </div>
-
-    <!-- MODE: Spirit Level View (Bubble Level Overlay) -->
-    <div id="spiritLevelView" class="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center p-6 z-20 hidden">
-      <div class="w-full max-w-sm flex flex-col items-center gap-6">
-        
-        <!-- Status indicator -->
-        <div id="levelStatusBadge" class="px-4 py-1.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-2">
-          <span class="w-2.5 h-2.5 rounded-full bg-amber-500" id="levelDot"></span>
-          <span id="levelStatusText">Ненивелирано</span>
-        </div>
-
-        <!-- 2D Bullseye Level (Surface Level) -->
-        <div class="relative w-64 h-64 rounded-full border-4 border-slate-700 bg-slate-900 shadow-2xl flex items-center justify-center overflow-hidden">
-          <!-- Target concentric rings -->
-          <div class="absolute w-48 h-48 rounded-full border border-slate-800 pointer-events-none"></div>
-          <div class="absolute w-32 h-32 rounded-full border border-slate-700/60 pointer-events-none"></div>
-          <div class="absolute w-16 h-16 rounded-full border-2 border-emerald-500/40 pointer-events-none"></div>
-
-          <!-- Crosshairs -->
-          <div class="absolute w-full h-[1px] bg-slate-800 pointer-events-none"></div>
-          <div class="absolute h-full w-[1px] bg-slate-800 pointer-events-none"></div>
-
-          <!-- Bubble element -->
-          <div id="levelBubble" class="absolute w-12 h-12 rounded-full bg-gradient-to-tr from-emerald-400 to-green-300 shadow-lg shadow-emerald-500/50 flex items-center justify-center transition-transform duration-75 ease-out">
-            <div class="w-3 h-3 rounded-full bg-white/70"></div>
-          </div>
-        </div>
-
-        <!-- Pitch & Roll Angle Indicators -->
-        <div class="grid grid-cols-2 gap-4 w-full">
-          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
-            <span class="text-[11px] text-slate-400">Наклон (X / Roll)</span>
-            <div class="text-2xl font-mono font-bold text-slate-100" id="rollAngle">0.0°</div>
-          </div>
-          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
-            <span class="text-[11px] text-slate-400">Наклон (Y / Pitch)</span>
-            <div class="text-2xl font-mono font-bold text-slate-100" id="pitchAngle">0.0°</div>
-          </div>
-        </div>
-
-        <!-- Beep on zero toggle & calibrate -->
-        <div class="flex items-center gap-3">
-          <button id="btnCalibrateZero" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs border border-slate-700 transition">
-            ⚖️ Калибрирай нула
-          </button>
-          <button id="btnSoundToggle" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs border border-slate-700 transition">
-            🔊 Звук: Вкл
-          </button>
-        </div>
-
-        <!-- Desktop Simulation controls (if no orientation sensors available) -->
-        <div id="desktopLevelControls" class="w-full bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2 text-xs">
-          <span class="text-[11px] text-slate-400">Симулация на наклон (за тест на компютър):</span>
-          <div class="flex items-center gap-2">
-            <span class="w-8 text-slate-400">X:</span>
-            <input type="range" id="simRoll" min="-45" max="45" value="0" class="w-full accent-blue-500">
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="w-8 text-slate-400">Y:</span>
-            <input type="range" id="simPitch" min="-45" max="45" value="0" class="w-full accent-blue-500">
-          </div>
-        </div>
-
-      </div>
+    <div id="arLevelDegrees" class="absolute top-1/2 mt-8 bg-black/70 px-3 py-1 rounded-full text-xs font-mono font-bold text-emerald-300 border border-emerald-500/40">
+      0.0°
     </div>
+  </div>
 
-    <!-- MODE: Clinometer / Height measurement -->
-    <div id="clinometerOverlay" class="absolute inset-0 pointer-events-none z-20 hidden flex flex-col justify-between p-6">
-      <!-- Reticle / Crosshair in center -->
-      <div class="absolute inset-0 flex items-center justify-center">
-        <div class="relative w-24 h-24 flex items-center justify-center">
-          <div class="w-full h-[1.5px] bg-red-500"></div>
-          <div class="h-full w-[1.5px] bg-red-500 absolute"></div>
-          <div class="w-10 h-10 border-2 border-red-500/80 rounded-full absolute"></div>
-        </div>
-      </div>
-
-      <!-- Settings top bar -->
-      <div class="pointer-events-auto bg-slate-900/90 backdrop-blur border border-slate-700 rounded-xl p-3 flex flex-wrap gap-4 items-center justify-between">
-        <div class="flex items-center gap-2">
-          <label class="text-xs text-slate-400">Разстояние до обекта:</label>
-          <input type="number" id="clinoDistance" value="5" step="0.5" class="w-20 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-center font-mono">
-          <span class="text-xs text-slate-400">m</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <label class="text-xs text-slate-400">Височина на камерата:</label>
-          <input type="number" id="clinoEyeHeight" value="1.6" step="0.1" class="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-center font-mono">
-          <span class="text-xs text-slate-400">m</span>
-        </div>
-      </div>
-
-      <!-- Action buttons & result -->
-      <div class="pointer-events-auto bg-slate-900/90 backdrop-blur border border-slate-700 rounded-xl p-4 flex flex-col gap-3">
-        <div class="flex items-center justify-between">
-          <div>
-            <span class="text-[10px] uppercase text-slate-400">Изчислена височина</span>
-            <div class="text-2xl font-mono font-bold text-emerald-400" id="clinoResultHeight">-- m</div>
-          </div>
-          <div class="text-right">
-            <span class="text-[10px] uppercase text-slate-400">Текущ наклон</span>
-            <div class="text-lg font-mono font-bold text-blue-400" id="clinoCurrentAngle">0.0°</div>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <button id="btnLockBase" class="py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold border border-slate-700">
-            1. Прицели основата
-          </button>
-          <button id="btnLockTop" class="py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-lg shadow-blue-600/30">
-            2. Прицели върха
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Calibration Modal / Dialog -->
-    <div id="calibrationModal" class="absolute inset-0 bg-black/70 backdrop-blur-sm z-40 flex items-center justify-center p-4 hidden">
-      <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
-        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div class="flex items-center gap-2">
-            <span class="text-xl">🎯</span>
-            <h3 class="font-bold text-slate-100">Калибрация на мащаба</h3>
-          </div>
-          <button id="btnCloseCalib" class="text-slate-400 hover:text-white p-1">✕</button>
-        </div>
-
-        <p class="text-xs text-slate-300 leading-relaxed">
-          Начертайте отсечка върху предмет с известна точна дължина (например банкова карта или лист хартия), след което изберете дължината:
-        </p>
-
-        <!-- Presets -->
-        <div class="grid grid-cols-3 gap-2">
-          <button data-ref-size="8.56" data-ref-unit="cm" class="preset-btn p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-center">
-            <div class="text-lg">💳</div>
-            <div class="text-[11px] font-semibold text-slate-200">Банкова карта</div>
-            <div class="text-[10px] text-blue-400 font-mono">8.56 cm</div>
-          </button>
-          <button data-ref-size="21.0" data-ref-unit="cm" class="preset-btn p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-center">
-            <div class="text-lg">📄</div>
-            <div class="text-[11px] font-semibold text-slate-200">Лист A4 (шир.)</div>
-            <div class="text-[10px] text-blue-400 font-mono">21.0 cm</div>
-          </button>
-          <button data-ref-size="2.45" data-ref-unit="cm" class="preset-btn p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-center">
-            <div class="text-lg">🪙</div>
-            <div class="text-[11px] font-semibold text-slate-200">Монета 1 лв.</div>
-            <div class="text-[10px] text-blue-400 font-mono">2.45 cm</div>
-          </button>
-        </div>
-
-        <!-- Custom size input -->
-        <div class="space-y-1">
-          <label class="text-xs text-slate-400">Или въведете точна дължина на начертаната линия:</label>
-          <div class="flex gap-2">
-            <input type="number" id="customRefLength" value="10" step="0.1" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-blue-500">
-            <select id="customRefUnit" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white">
-              <option value="cm">cm</option>
-              <option value="mm">mm</option>
-              <option value="m">m</option>
-              <option value="in">in</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="flex gap-2 pt-2">
-          <button id="btnApplyCalibration" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg text-xs shadow-lg shadow-blue-500/20 transition">
-            Приложи калибрацията
-          </button>
-          <button id="btnResetCalibration" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition">
-            Фабрично (100 px = 10 cm)
-          </button>
-        </div>
-      </div>
-    </div>
-
-  </main>
-
-  <!-- Bottom Floating Media & Input Bar -->
-  <footer class="bg-slate-900 border-t border-slate-800 px-4 py-2 flex items-center justify-between gap-2 z-20 shrink-0">
-    <!-- Camera stream control -->
-    <div class="flex items-center gap-2">
-      <button id="btnToggleCamera" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
-        <span id="cameraIcon">📷</span>
-        <span id="cameraText">Включи камера</span>
+  <!-- 7. BOTTOM CONTROLS & AR ACTION BUTTONS -->
+  <footer class="relative z-30 pb-safe px-4 py-4 flex flex-col gap-3 pointer-events-none">
+    
+    <!-- AR Primary Action: Big Apple/Google Measure style Add Point Button -->
+    <div class="flex items-center justify-center gap-4 pointer-events-auto">
+      <button id="btnUndoPoint" class="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-white/80 active:scale-95 transition shadow-lg" title="Стъпка назад">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
       </button>
 
-      <!-- Upload photo button -->
-      <label class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer">
-        <span>🖼️</span> Снимка
-        <input type="file" id="fileInput" accept="image/*" class="hidden">
-      </label>
+      <!-- BIG ADD POINT BUTTON -->
+      <button id="btnAddPoint" class="w-18 h-18 px-6 py-4 rounded-full bg-blue-600 active:bg-blue-700 text-white font-bold text-sm flex items-center gap-2.5 shadow-2xl shadow-blue-500/50 border-2 border-white/40 active:scale-95 transition">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+        <span id="addPointText">Постави точка</span>
+      </button>
 
-      <!-- Grid Toggle -->
-      <button id="btnToggleGrid" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs" title="Вкл/Изкл координатна мрежа">
-        #️⃣ Мрежа
+      <!-- Calibrate Button -->
+      <button id="btnOpenCalib" class="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-amber-400 active:scale-95 transition shadow-lg" title="Калибрация">
+        🎯
       </button>
     </div>
 
-    <!-- Scale ratio readout -->
-    <div class="text-[11px] font-mono text-slate-400 hidden sm:block">
-      Мащаб: <span id="scaleRatioText" class="text-blue-400">10.0 px = 1.0 cm</span>
-    </div>
-
-    <!-- Export screenshot / Measurement list -->
-    <div class="flex items-center gap-2">
-      <button id="btnExport" class="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition">
-        <span>💾</span> Запази
-      </button>
+    <!-- Mode Selector Tabs (Scrollable) -->
+    <div class="pointer-events-auto flex items-center justify-center">
+      <div class="bg-black/70 backdrop-blur-md border border-white/15 p-1 rounded-2xl flex gap-1 overflow-x-auto max-w-full shadow-xl">
+        <button data-mode="line" class="mode-tab active px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 text-white whitespace-nowrap">
+          📏 Разстояние
+        </button>
+        <button data-mode="polyline" class="mode-tab px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-white whitespace-nowrap">
+          〰️ Полилиния
+        </button>
+        <button data-mode="angle" class="mode-tab px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-white whitespace-nowrap">
+          📐 Ъгъл
+        </button>
+        <button data-mode="level" class="mode-tab px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-white whitespace-nowrap">
+          ⚖️ Нивелир
+        </button>
+        <button data-mode="height" class="mode-tab px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-white whitespace-nowrap">
+          🌲 Височина
+        </button>
+      </div>
     </div>
   </footer>
 
-  <!-- Application Logic -->
-  <script>
-    (function () {
-      // State
-      const state = {
-        mode: 'line', // 'line', 'polyline', 'angle', 'polygon', 'level', 'clinometer', 'calibrate'
-        unit: 'cm', // 'cm', 'mm', 'm', 'in', 'px'
-        pixelsPerCm: 10.0, // Default calibration factor (10px = 1cm)
-        points: [], // Current active measurement points [{x, y}]
-        completedShapes: [], // Saved measurements
-        activeDragIndex: -1, // Index of point being dragged
-        isDragging: false,
-        cameraActive: false,
-        cameraStream: null,
-        soundEnabled: true,
-        zeroOffset: { roll: 0, pitch: 0 },
-        currentTilt: { roll: 0, pitch: 0 },
-        clino: {
-          baseAngle: 0,
-          topAngle: 0,
-          hasBase: false,
-          hasTop: false
-        }
-      };
+  <!-- 8. STARTUP AR PERMISSION MODAL (FIRST OPEN) -->
+  <div id="startupModal" class="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+    <div class="w-20 h-20 rounded-3xl bg-blue-600/20 border-2 border-blue-500 flex items-center justify-center text-4xl mb-4 shadow-2xl shadow-blue-500/30">
+      📱
+    </div>
+    <h2 class="text-2xl font-black tracking-tight mb-2">AR Измервател</h2>
+    <p class="text-slate-300 text-sm max-w-xs mb-6 leading-relaxed">
+      Насочете камерата към обекти, под, мебели или стени, за да измервате разстояния и ъгли в реално време.
+    </p>
 
-      // Unit conversion factors relative to cm
-      const UNIT_FACTORS = {
-        cm: 1.0,
-        mm: 10.0,
-        m: 0.01,
-        in: 0.393701,
-        px: null // Handled dynamically
+    <!-- Start Camera & Sensors Button -->
+    <button id="btnStartAR" class="w-full max-w-xs py-4 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-base shadow-xl shadow-blue-500/40 active:scale-95 transition flex items-center justify-center gap-2">
+      <span>🚀</span>
+      <span>СТАРТИРАЙ AR КАМЕРА</span>
+    </button>
+
+    <div class="mt-4 text-[11px] text-slate-400 flex items-center gap-1.5">
+      <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+      Изисква достъп до задната камера на телефона
+    </div>
+  </div>
+
+  <!-- 9. CALIBRATION MODAL -->
+  <div id="calibModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="font-bold text-white flex items-center gap-2 text-sm">
+          <span>🎯</span> Калибриране на реалния мащаб
+        </h3>
+        <button id="btnCloseCalibModal" class="text-slate-400 hover:text-white p-1">✕</button>
+      </div>
+
+      <p class="text-xs text-slate-300 leading-relaxed">
+        Поставете познат предмет в кадъра и маркирайте двата му края:
+      </p>
+
+      <div class="grid grid-cols-2 gap-2">
+        <button data-calib-size="8.56" class="btn-calib-preset p-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left">
+          <div class="text-lg mb-1">💳</div>
+          <div class="text-xs font-semibold text-white">Банкова карта</div>
+          <div class="text-[10px] text-blue-400 font-mono">8.56 cm</div>
+        </button>
+
+        <button data-calib-size="21.0" class="btn-calib-preset p-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left">
+          <div class="text-lg mb-1">📄</div>
+          <div class="text-xs font-semibold text-white">Лист A4 (шир.)</div>
+          <div class="text-[10px] text-blue-400 font-mono">21.0 cm</div>
+        </button>
+
+        <button data-calib-size="2.45" class="btn-calib-preset p-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left">
+          <div class="text-lg mb-1">🪙</div>
+          <div class="text-xs font-semibold text-white">Монета 1 лв.</div>
+          <div class="text-[10px] text-blue-400 font-mono">2.45 cm</div>
+        </button>
+
+        <button data-calib-size="10.0" class="btn-calib-preset p-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left">
+          <div class="text-lg mb-1">📏</div>
+          <div class="text-xs font-semibold text-white">10 см отсечка</div>
+          <div class="text-[10px] text-blue-400 font-mono">10.0 cm</div>
+        </button>
+      </div>
+
+      <!-- Phone holding height for sensor trigonometric estimation -->
+      <div class="bg-slate-800/60 p-3 rounded-xl border border-slate-700 space-y-2">
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-slate-300">Височина на държане на телефона:</span>
+          <span id="phoneHeightLabel" class="font-mono text-blue-400 font-bold">1.40 m</span>
+        </div>
+        <input type="range" id="phoneHeightSlider" min="0.5" max="2.2" step="0.05" value="1.4" class="w-full accent-blue-500">
+        <p class="text-[10px] text-slate-400 leading-tight">
+          Използва се от жироскопа за автоматично тригонометрично изчисляване на разстояния по пода.
+        </p>
+      </div>
+
+      <button id="btnSaveCalib" class="w-full py-2.5 rounded-xl bg-blue-600 text-white font-semibold text-xs shadow-lg shadow-blue-600/30">
+        Готово
+      </button>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT APPLICATION LOGIC -->
+  <script>
+    (function() {
+      // Application State
+      const state = {
+        mode: 'line', // 'line', 'polyline', 'angle', 'level', 'height'
+        unit: 'cm', // 'cm', 'mm', 'm', 'in'
+        pixelsPerCm: 14.5, // Calibrated pixels per cm
+        userPhoneHeightMeters: 1.40, // Height phone is held above ground
+        cameraRunning: false,
+        points: [], // Array of {x, y} screen coordinates
+        completedMeasurements: [],
+        currentTilt: { roll: 0, pitch: 0 },
+        heightMeasure: { basePitch: null, topPitch: null }
       };
 
       // Elements
-      const canvas = document.getElementById('measuringCanvas');
+      const video = document.getElementById('arVideo');
+      const canvas = document.getElementById('arCanvas');
       const ctx = canvas.getContext('2d');
-      const magCanvas = document.getElementById('magnifierCanvas');
-      const magCtx = magCanvas.getContext('2d');
-      const magnifier = document.getElementById('magnifier');
-      const video = document.getElementById('cameraVideo');
-      const refImg = document.getElementById('referenceImage');
-      const gridBg = document.getElementById('gridBackground');
-      
-      const readoutTitle = document.getElementById('readoutTitle');
-      const readoutValue = document.getElementById('readoutValue');
-      const readoutUnit = document.getElementById('readoutUnit');
-      const readoutSubtext = document.getElementById('readoutSubtext');
-      const activeModeBadge = document.getElementById('activeModeBadge');
-      const statusMessage = document.getElementById('statusMessage');
-      const scaleRatioText = document.getElementById('scaleRatioText');
+      const startupModal = document.getElementById('startupModal');
+      const btnStartAR = document.getElementById('btnStartAR');
+      const btnAddPoint = document.getElementById('btnAddPoint');
+      const btnUndoPoint = document.getElementById('btnUndoPoint');
+      const btnClear = document.getElementById('btnClear');
+      const btnOpenCalib = document.getElementById('btnOpenCalib');
+      const calibModal = document.getElementById('calibModal');
+      const btnCloseCalibModal = document.getElementById('btnCloseCalibModal');
+      const btnSaveCalib = document.getElementById('btnSaveCalib');
+      const unitSelector = document.getElementById('unitSelector');
+      const liveResultNumber = document.getElementById('liveResultNumber');
+      const liveResultUnit = document.getElementById('liveResultUnit');
+      const hudStatus = document.getElementById('hudStatus');
+      const hudModeLabel = document.getElementById('hudModeLabel');
+      const arLevelOverlay = document.getElementById('arLevelOverlay');
+      const arHorizonLine = document.getElementById('arHorizonLine');
+      const arLevelDegrees = document.getElementById('arLevelDegrees');
+      const centerReticle = document.getElementById('centerReticle');
 
-      // Resize canvas to full viewport
+      // Resize canvas to full viewport resolution
       function resizeCanvas() {
-        const rect = canvas.parentElement.getBoundingClientRect();
-        canvas.width = rect.width;
-        canvas.height = rect.height;
-        magCanvas.width = 112;
-        magCanvas.height = 112;
-        render();
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
       }
       window.addEventListener('resize', resizeCanvas);
+      resizeCanvas();
 
-      // Distance calculation in pixels
-      function dist(p1, p2) {
+      // Start AR Camera stream
+      async function startARCamera() {
+        try {
+          // Request Camera with environment (back-facing) lens
+          const constraints = {
+            video: {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            },
+            audio: false
+          };
+
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          video.srcObject = stream;
+          await video.play();
+          state.cameraRunning = true;
+
+          // Request Motion & Orientation permissions (required for iOS 13+)
+          if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            try {
+              const perm = await DeviceOrientationEvent.requestPermission();
+              if (perm === 'granted') {
+                bindOrientationEvents();
+              }
+            } catch (e) {
+              console.log('Orientation permission prompt closed', e);
+            }
+          } else {
+            bindOrientationEvents();
+          }
+
+          // Hide startup modal
+          startupModal.classList.add('hidden');
+          hudStatus.innerText = 'Камерата е активна. Поставете точка А.';
+          requestAnimationFrame(renderLoop);
+
+        } catch (err) {
+          alert('Грешка при достъп до камерата:\n' + err.message + '\nМоля, разрешете достъпа до камера в настройките на браузъра.');
+        }
+      }
+
+      // Bind gyroscope / orientation events
+      function bindOrientationEvents() {
+        window.addEventListener('deviceorientation', (e) => {
+          if (e.gamma !== null && e.beta !== null) {
+            state.currentTilt.roll = e.gamma; // Roll: tilt left/right [-90, 90]
+            state.currentTilt.pitch = e.beta; // Pitch: tilt forward/back [-180, 180]
+            updateLevelHUD();
+          }
+        });
+      }
+
+      function updateLevelHUD() {
+        if (state.mode === 'level') {
+          const roll = state.currentTilt.roll;
+          const pitch = state.currentTilt.pitch;
+          arHorizonLine.style.transform = `rotate(${-roll}deg) translateY(${(pitch - 45) * 2}px)`;
+          arLevelDegrees.innerText = `${Math.abs(roll).toFixed(1)}° (Roll) | ${pitch.toFixed(1)}° (Pitch)`;
+
+          if (Math.abs(roll) <= 0.5) {
+            arHorizonLine.classList.add('bg-emerald-400');
+            arLevelDegrees.classList.add('text-emerald-300');
+          } else {
+            arHorizonLine.classList.remove('bg-emerald-400');
+            arLevelDegrees.classList.remove('text-emerald-300');
+          }
+        }
+      }
+
+      btnStartAR.addEventListener('click', startARCamera);
+
+      // Distance calculation between 2 points
+      function calcDistance(p1, p2) {
         return Math.hypot(p2.x - p1.x, p2.y - p1.y);
       }
 
-      // Convert pixel distance to selected unit
-      function formatDistance(px) {
-        if (state.unit === 'px') {
-          return { value: px.toFixed(1), unit: 'px' };
+      // Format distance according to selected unit and calibration
+      function formatDist(pixelDist) {
+        const cm = pixelDist / state.pixelsPerCm;
+        if (state.unit === 'mm') {
+          return { num: (cm * 10).toFixed(0), unit: 'mm' };
+        } else if (state.unit === 'm') {
+          return { num: (cm / 100).toFixed(2), unit: 'm' };
+        } else if (state.unit === 'in') {
+          return { num: (cm * 0.393701).toFixed(1), unit: 'in' };
         }
-        const cm = px / state.pixelsPerCm;
-        const factor = UNIT_FACTORS[state.unit];
-        const converted = cm * factor;
-        const decimals = state.unit === 'm' ? 3 : 2;
-        return { value: converted.toFixed(decimals), unit: state.unit };
+        return { num: cm.toFixed(1), unit: 'cm' };
       }
 
-      // Calculate angle formed by 3 points: A -> B (vertex) -> C
-      function calculateAngle(A, B, C) {
+      // Angle calculation between 3 points: A -> B (vertex) -> C
+      function calcAngle(A, B, C) {
         const v1 = { x: A.x - B.x, y: A.y - B.y };
         const v2 = { x: C.x - B.x, y: C.y - B.y };
         const dot = v1.x * v2.x + v1.y * v2.y;
@@ -427,723 +372,335 @@
         if (mag1 === 0 || mag2 === 0) return 0;
         let cos = dot / (mag1 * mag2);
         cos = Math.max(-1, Math.min(1, cos));
-        const rad = Math.acos(cos);
-        return (rad * 180) / Math.PI;
+        return (Math.acos(cos) * 180) / Math.PI;
       }
 
-      // Polygon Area using Shoelace formula
-      function calculateArea(pts) {
-        if (pts.length < 3) return 0;
-        let area = 0;
-        for (let i = 0; i < pts.length; i++) {
-          const j = (i + 1) % pts.length;
-          area += pts[i].x * pts[j].y;
-          area -= pts[j].x * pts[i].y;
-        }
-        area = Math.abs(area) / 2; // In square pixels
-        if (state.unit === 'px') return { value: area.toFixed(1), unit: 'px²' };
-        
-        // Convert to cm²
-        const cm2 = area / (state.pixelsPerCm * state.pixelsPerCm);
-        if (state.unit === 'm') {
-          return { value: (cm2 * 0.0001).toFixed(4), unit: 'm²' };
-        } else if (state.unit === 'mm') {
-          return { value: (cm2 * 100).toFixed(1), unit: 'mm²' };
-        } else if (state.unit === 'in') {
-          return { value: (cm2 * 0.1550).toFixed(2), unit: 'in²' };
-        }
-        return { value: cm2.toFixed(2), unit: 'cm²' };
+      // Center of screen coordinate
+      function getCenterPos() {
+        return { x: canvas.width / 2, y: canvas.height / 2 };
       }
 
-      // Web Audio Beep generator for Spirit Level
-      let audioCtx = null;
-      function playLevelBeep() {
-        if (!state.soundEnabled) return;
-        try {
-          if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz pleasant A5
-          gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-          osc.start();
-          osc.stop(audioCtx.currentTime + 0.1);
-        } catch (e) {
-          // Ignore audio error
-        }
-      }
+      // ADD POINT ACTION (Via button or screen tap)
+      function addPoint(pos) {
+        const point = pos || getCenterPos();
 
-      // Render all measurement drawings
-      function render() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Draw previously completed shapes
-        state.completedShapes.forEach(shape => drawShape(shape, false));
-
-        // Draw active in-progress shape
-        if (state.points.length > 0) {
-          drawShape({
-            mode: state.mode,
-            points: state.points,
-            color: '#3b82f6'
-          }, true);
-        }
-
-        updateLiveReadout();
-      }
-
-      // Draw a specific measurement shape
-      function drawShape(shape, isActive) {
-        const pts = shape.points;
-        if (!pts || pts.length === 0) return;
-
-        const mainColor = isActive ? '#3b82f6' : (shape.color || '#10b981');
-        ctx.save();
-
-        // 1. Line mode (2 points)
-        if (shape.mode === 'line' || shape.mode === 'calibrate') {
-          if (pts.length >= 2) {
-            ctx.beginPath();
-            ctx.moveTo(pts[0].x, pts[0].y);
-            ctx.lineTo(pts[1].x, pts[1].y);
-            ctx.strokeStyle = shape.mode === 'calibrate' ? '#f59e0b' : mainColor;
-            ctx.lineWidth = 3;
-            ctx.stroke();
-
-            // Measurement Label
-            const midX = (pts[0].x + pts[1].x) / 2;
-            const midY = (pts[0].y + pts[1].y) / 2;
-            const d = dist(pts[0], pts[1]);
-            const formatted = formatDistance(d);
-            drawBadge(midX, midY - 14, `${formatted.value} ${formatted.unit}`, mainColor);
-          }
-        }
-
-        // 2. Polyline mode
-        else if (shape.mode === 'polyline') {
-          if (pts.length > 1) {
-            ctx.beginPath();
-            ctx.moveTo(pts[0].x, pts[0].y);
-            for (let i = 1; i < pts.length; i++) {
-              ctx.lineTo(pts[i].x, pts[i].y);
-            }
-            ctx.strokeStyle = mainColor;
-            ctx.lineWidth = 3;
-            ctx.stroke();
-
-            // Segment labels
-            for (let i = 0; i < pts.length - 1; i++) {
-              const mx = (pts[i].x + pts[i + 1].x) / 2;
-              const my = (pts[i].y + pts[i + 1].y) / 2;
-              const segmentDist = dist(pts[i], pts[i + 1]);
-              const formatted = formatDistance(segmentDist);
-              drawBadge(mx, my - 10, `${formatted.value} ${formatted.unit}`, '#64748b', 10);
-            }
-          }
-        }
-
-        // 3. Angle mode (3 points: A -> B -> C)
-        else if (shape.mode === 'angle') {
-          if (pts.length >= 2) {
-            ctx.beginPath();
-            ctx.moveTo(pts[0].x, pts[0].y);
-            ctx.lineTo(pts[1].x, pts[1].y);
-            if (pts[2]) {
-              ctx.lineTo(pts[2].x, pts[2].y);
-            }
-            ctx.strokeStyle = mainColor;
-            ctx.lineWidth = 3;
-            ctx.stroke();
-          }
-          if (pts.length === 3) {
-            const angle = calculateAngle(pts[0], pts[1], pts[2]);
-            const B = pts[1];
-            // Arc
-            const a1 = Math.atan2(pts[0].y - B.y, pts[0].x - B.x);
-            const a2 = Math.atan2(pts[2].y - B.y, pts[2].x - B.x);
-            ctx.beginPath();
-            ctx.arc(B.x, B.y, 30, a1, a2, false);
-            ctx.strokeStyle = '#f59e0b';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            drawBadge(B.x, B.y - 35, `${angle.toFixed(1)}°`, '#f59e0b');
-          }
-        }
-
-        // 4. Polygon mode
-        else if (shape.mode === 'polygon') {
-          if (pts.length >= 2) {
-            ctx.beginPath();
-            ctx.moveTo(pts[0].x, pts[0].y);
-            for (let i = 1; i < pts.length; i++) {
-              ctx.lineTo(pts[i].x, pts[i].y);
-            }
-            if (pts.length >= 3) {
-              ctx.closePath();
-              ctx.fillStyle = isActive ? 'rgba(59, 130, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)';
-              ctx.fill();
-            }
-            ctx.strokeStyle = mainColor;
-            ctx.lineWidth = 3;
-            ctx.stroke();
-
-            if (pts.length >= 3) {
-              // Centroid for area label
-              let cx = 0, cy = 0;
-              pts.forEach(p => { cx += p.x; cy += p.y; });
-              cx /= pts.length;
-              cy /= pts.length;
-              const area = calculateArea(pts);
-              drawBadge(cx, cy, `Площ: ${area.value} ${area.unit}`, '#10b981');
-            }
-          }
-        }
-
-        // Draw handles / points
-        pts.forEach((p, idx) => {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
-          ctx.fillStyle = '#ffffff';
-          ctx.fill();
-          ctx.lineWidth = 2.5;
-          ctx.strokeStyle = mainColor;
-          ctx.stroke();
-
-          // Small point index number
-          ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 9px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText((idx + 1).toString(), p.x, p.y);
-        });
-
-        ctx.restore();
-      }
-
-      // Draw floating rounded badge for labels
-      function drawBadge(x, y, text, bgColor, fontSize = 12) {
-        ctx.save();
-        ctx.font = `600 ${fontSize}px sans-serif`;
-        const metrics = ctx.measureText(text);
-        const padX = 8;
-        const padY = 4;
-        const w = metrics.width + padX * 2;
-        const h = fontSize + padY * 2;
-        const rx = x - w / 2;
-        const ry = y - h / 2;
-
-        // Pill background
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-        ctx.beginPath();
-        ctx.roundRect(rx, ry, w, h, 6);
-        ctx.fill();
-
-        ctx.strokeStyle = bgColor;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        // Text
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, x, y);
-        ctx.restore();
-      }
-
-      // Update Top-Right Live Readout card
-      function updateLiveReadout() {
-        const pts = state.points;
-        if (state.mode === 'line' || state.mode === 'calibrate') {
-          readoutTitle.innerText = state.mode === 'calibrate' ? 'Калибрационна отсечка' : 'Разстояние';
-          if (pts.length === 2) {
-            const d = dist(pts[0], pts[1]);
-            const res = formatDistance(d);
-            readoutValue.innerHTML = `<span>${res.value}</span><span class="text-xs text-slate-400">${res.unit}</span>`;
-            readoutSubtext.innerText = `ΔX: ${(Math.abs(pts[1].x - pts[0].x) / state.pixelsPerCm).toFixed(1)}cm | ΔY: ${(Math.abs(pts[1].y - pts[0].y) / state.pixelsPerCm).toFixed(1)}cm`;
-          } else {
-            readoutValue.innerHTML = `<span>--</span>`;
-            readoutSubtext.innerText = 'Поставете 2 точки';
-          }
-        } else if (state.mode === 'polyline') {
-          readoutTitle.innerText = 'Обща дължина на пътя';
-          let totalPx = 0;
-          for (let i = 0; i < pts.length - 1; i++) {
-            totalPx += dist(pts[i], pts[i + 1]);
-          }
-          const res = formatDistance(totalPx);
-          readoutValue.innerHTML = `<span>${res.value}</span><span class="text-xs text-slate-400">${res.unit}</span>`;
-          readoutSubtext.innerText = `${pts.length} точки / ${Math.max(0, pts.length - 1)} сегмента`;
-        } else if (state.mode === 'angle') {
-          readoutTitle.innerText = 'Измерен ъгъл';
-          if (pts.length === 3) {
-            const deg = calculateAngle(pts[0], pts[1], pts[2]);
-            readoutValue.innerHTML = `<span>${deg.toFixed(1)}</span><span class="text-xs text-slate-400">°</span>`;
-            readoutSubtext.innerText = `Връх: Точка 2 | ${(deg * Math.PI / 180).toFixed(3)} rad`;
-          } else {
-            readoutValue.innerHTML = `<span>--</span>`;
-            readoutSubtext.innerText = `Поставени ${pts.length}/3 точки`;
-          }
-        } else if (state.mode === 'polygon') {
-          readoutTitle.innerText = 'Площ & Периметър';
-          if (pts.length >= 3) {
-            const area = calculateArea(pts);
-            readoutValue.innerHTML = `<span>${area.value}</span><span class="text-xs text-slate-400">${area.unit}</span>`;
-            let peri = 0;
-            for (let i = 0; i < pts.length; i++) {
-              peri += dist(pts[i], pts[(i + 1) % pts.length]);
-            }
-            const pRes = formatDistance(peri);
-            readoutSubtext.innerText = `Периметър: ${pRes.value} ${pRes.unit}`;
-          } else {
-            readoutValue.innerHTML = `<span>--</span>`;
-            readoutSubtext.innerText = 'Поне 3 точки за площ';
-          }
-        }
-      }
-
-      // Check if click/touch is near an existing point to drag it
-      function findPointNear(pos, threshold = 25) {
-        for (let i = state.points.length - 1; i >= 0; i--) {
-          if (dist(state.points[i], pos) <= threshold) {
-            return i;
-          }
-        }
-        return -1;
-      }
-
-      // Update Magnifier loupe
-      function updateMagnifier(x, y) {
-        magnifier.classList.remove('hidden');
-        magCtx.clearRect(0, 0, magCanvas.width, magCanvas.height);
-        magCtx.save();
-        magCtx.drawImage(
-          canvas,
-          x - 28, y - 28, 56, 56, // Source box (zoomed in 2x)
-          0, 0, magCanvas.width, magCanvas.height
-        );
-        magCtx.restore();
-      }
-
-      function hideMagnifier() {
-        magnifier.classList.add('hidden');
-      }
-
-      // Touch / Mouse event handlers
-      function getCanvasPos(e) {
-        const rect = canvas.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        return {
-          x: clientX - rect.left,
-          y: clientY - rect.top
-        };
-      }
-
-      canvas.addEventListener('pointerdown', (e) => {
-        if (state.mode === 'level') return;
-        const pos = getCanvasPos(e);
-        const nearIdx = findPointNear(pos);
-
-        if (nearIdx !== -1) {
-          state.activeDragIndex = nearIdx;
-          state.isDragging = true;
-          updateMagnifier(pos.x, pos.y);
-          return;
-        }
-
-        // Otherwise place new point
-        if (state.mode === 'line' || state.mode === 'calibrate') {
+        if (state.mode === 'line') {
           if (state.points.length >= 2) {
-            // Save and start new
-            state.completedShapes.push({
-              mode: state.mode,
+            state.completedMeasurements.push({
+              mode: 'line',
               points: [...state.points],
               color: '#10b981'
             });
-            state.points = [pos];
+            state.points = [point];
+            hudStatus.innerText = 'Точка А поставена. Насочете към точка B.';
           } else {
-            state.points.push(pos);
-            if (state.points.length === 2 && state.mode === 'calibrate') {
-              // Open calibration modal
-              document.getElementById('calibrationModal').classList.remove('hidden');
+            state.points.push(point);
+            if (state.points.length === 1) {
+              hudStatus.innerText = 'Точка А поставена. Насочете към точка B.';
+            } else if (state.points.length === 2) {
+              hudStatus.innerText = 'Измерването е завършено!';
             }
           }
+        } else if (state.mode === 'polyline') {
+          state.points.push(point);
+          hudStatus.innerText = `Поставени ${state.points.length} точки.`;
         } else if (state.mode === 'angle') {
           if (state.points.length >= 3) {
-            state.completedShapes.push({
+            state.completedMeasurements.push({
               mode: 'angle',
               points: [...state.points],
               color: '#f59e0b'
             });
-            state.points = [pos];
+            state.points = [point];
+            hudStatus.innerText = 'Първо рамо поставено. Насочете върха.';
           } else {
-            state.points.push(pos);
+            state.points.push(point);
+            if (state.points.length === 1) hudStatus.innerText = 'Насочете към ВЪРХА на ъгъла.';
+            else if (state.points.length === 2) hudStatus.innerText = 'Насочете към второто рамо.';
+            else hudStatus.innerText = 'Ъгълът е измерен!';
           }
-        } else if (state.mode === 'polyline' || state.mode === 'polygon') {
-          state.points.push(pos);
+        } else if (state.mode === 'height') {
+          if (!state.heightMeasure.basePitch) {
+            state.heightMeasure.basePitch = state.currentTilt.pitch;
+            hudStatus.innerText = '1/2 Основата е заключена! Сега прицелете ВЪРХА.';
+            btnAddPoint.classList.add('bg-emerald-600');
+          } else {
+            state.heightMeasure.topPitch = state.currentTilt.pitch;
+            const hEye = state.userPhoneHeightMeters;
+            // Trigonometry: h = d * (tan(top) - tan(base))
+            const pitchDiffRad = Math.abs(state.heightMeasure.topPitch - state.heightMeasure.basePitch) * (Math.PI / 180);
+            const calculatedH = (hEye * 2.5) * Math.tan(pitchDiffRad) + hEye;
+            liveResultNumber.innerText = calculatedH.toFixed(2);
+            liveResultUnit.innerText = 'm';
+            hudStatus.innerText = `Височина: ${calculatedH.toFixed(2)} m`;
+            state.heightMeasure.basePitch = null;
+            btnAddPoint.classList.remove('bg-emerald-600');
+          }
         }
+      }
 
-        render();
-        updateMagnifier(pos.x, pos.y);
-      });
+      btnAddPoint.addEventListener('click', () => addPoint(getCenterPos()));
 
-      canvas.addEventListener('pointermove', (e) => {
-        if (!state.isDragging) return;
-        const pos = getCanvasPos(e);
-        if (state.activeDragIndex >= 0 && state.points[state.activeDragIndex]) {
-          state.points[state.activeDragIndex] = pos;
-          render();
-          updateMagnifier(pos.x, pos.y);
-        }
-      });
-
-      window.addEventListener('pointerup', () => {
-        state.isDragging = false;
-        state.activeDragIndex = -1;
-        hideMagnifier();
-      });
-
-      // Unit change handler
-      document.getElementById('unitSelector').addEventListener('change', (e) => {
-        state.unit = e.target.value;
-        render();
-      });
-
-      // Clear button
-      document.getElementById('btnClear').addEventListener('click', () => {
-        state.points = [];
-        state.completedShapes = [];
-        render();
+      // Tap on canvas to place point directly where touched
+      canvas.addEventListener('pointerdown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const touchPoint = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        };
+        addPoint(touchPoint);
       });
 
       // Undo button
-      document.getElementById('btnUndo').addEventListener('click', () => {
+      btnUndoPoint.addEventListener('click', () => {
         if (state.points.length > 0) {
           state.points.pop();
-        } else if (state.completedShapes.length > 0) {
-          state.points = state.completedShapes.pop().points;
+        } else if (state.completedMeasurements.length > 0) {
+          state.points = state.completedMeasurements.pop().points;
         }
-        render();
+        hudStatus.innerText = 'Стъпка назад.';
       });
 
-      // Tool mode switching
-      const toolButtons = document.querySelectorAll('.tool-btn');
-      const spiritLevelView = document.getElementById('spiritLevelView');
-      const clinometerOverlay = document.getElementById('clinometerOverlay');
+      // Clear all
+      btnClear.addEventListener('click', () => {
+        state.points = [];
+        state.completedMeasurements = [];
+        state.heightMeasure.basePitch = null;
+        liveResultNumber.innerText = '0.0';
+        hudStatus.innerText = 'Всички измервания са изчистени.';
+      });
 
-      toolButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-          const mode = btn.dataset.mode;
-          setMode(mode);
+      // Main Render Loop: Draws AR elements over camera stream
+      function renderLoop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const center = getCenterPos();
+
+        // 1. Draw completed measurements
+        state.completedMeasurements.forEach(item => {
+          drawShape(item.points, item.mode, item.color || '#10b981', false);
         });
-      });
 
-      function setMode(mode) {
-        state.mode = mode;
-        toolButtons.forEach(b => {
-          if (b.dataset.mode === mode) {
-            b.classList.add('bg-blue-600', 'text-white');
-            b.classList.remove('bg-slate-800', 'text-slate-300');
-          } else {
-            b.classList.remove('bg-blue-600', 'text-white');
-            b.classList.add('bg-slate-800', 'text-slate-300');
+        // 2. Draw active measurement in progress
+        if (state.points.length > 0) {
+          // Dynamic rubber-band line from last point to center reticle
+          const previewPoints = [...state.points];
+          if ((state.mode === 'line' && state.points.length === 1) ||
+              (state.mode === 'polyline') ||
+              (state.mode === 'angle' && state.points.length < 3)) {
+            previewPoints.push(center);
           }
+          drawShape(previewPoints, state.mode, '#3b82f6', true);
+        }
+
+        requestAnimationFrame(renderLoop);
+      }
+
+      // Draw AR Shapes & Distance badges
+      function drawShape(pts, mode, color, isActive) {
+        if (!pts || pts.length === 0) return;
+
+        ctx.save();
+
+        // Line / Distance mode
+        if (mode === 'line') {
+          if (pts.length >= 2) {
+            // Draw line
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+            ctx.lineTo(pts[1].x, pts[1].y);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3.5;
+            ctx.lineCap = 'round';
+            ctx.shadowColor = 'rgba(0,0,0,0.8)';
+            ctx.shadowBlur = 6;
+            ctx.stroke();
+
+            // Distance label in center of line
+            const midX = (pts[0].x + pts[1].x) / 2;
+            const midY = (pts[0].y + pts[1].y) / 2;
+            const d = calcDistance(pts[0], pts[1]);
+            const formatted = formatDist(d);
+
+            drawARBadge(midX, midY, `${formatted.num} ${formatted.unit}`);
+
+            if (isActive) {
+              liveResultNumber.innerText = formatted.num;
+              liveResultUnit.innerText = formatted.unit;
+            }
+          }
+        }
+
+        // Polyline mode
+        else if (mode === 'polyline') {
+          if (pts.length > 1) {
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+            let totalDist = 0;
+            for (let i = 1; i < pts.length; i++) {
+              ctx.lineTo(pts[i].x, pts[i].y);
+              totalDist += calcDistance(pts[i - 1], pts[i]);
+            }
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3.5;
+            ctx.stroke();
+
+            if (isActive) {
+              const formatted = formatDist(totalDist);
+              liveResultNumber.innerText = formatted.num;
+              liveResultUnit.innerText = formatted.unit;
+            }
+          }
+        }
+
+        // Angle mode
+        else if (mode === 'angle') {
+          if (pts.length >= 2) {
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+            ctx.lineTo(pts[1].x, pts[1].y);
+            if (pts[2]) ctx.lineTo(pts[2].x, pts[2].y);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3.5;
+            ctx.stroke();
+          }
+          if (pts.length === 3) {
+            const angle = calcAngle(pts[0], pts[1], pts[2]);
+            const B = pts[1];
+            drawARBadge(B.x, B.y - 25, `${angle.toFixed(1)}°`, '#f59e0b');
+            if (isActive) {
+              liveResultNumber.innerText = angle.toFixed(1);
+              liveResultUnit.innerText = '°';
+            }
+          }
+        }
+
+        // Draw 3D-looking pins / markers at each point
+        pts.forEach((p, idx) => {
+          // Outer glowing ring
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = 'rgba(0,0,0,0.9)';
+          ctx.shadowBlur = 8;
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
         });
 
-        // Hide overlays by default
-        spiritLevelView.classList.add('hidden');
-        clinometerOverlay.classList.add('hidden');
-        canvas.classList.remove('hidden');
+        ctx.restore();
+      }
 
-        if (mode === 'level') {
-          spiritLevelView.classList.remove('hidden');
-          canvas.classList.add('hidden');
-          activeModeBadge.innerText = 'Нивелир';
-          statusMessage.innerText = 'Поставете телефона легнал за 2D нивелиране или прав';
-        } else if (mode === 'clinometer') {
-          clinometerOverlay.classList.remove('hidden');
-          activeModeBadge.innerText = 'Клинометър';
-          statusMessage.innerText = 'Прицелете основата и върха през камерата';
-          if (!state.cameraActive) toggleCamera();
-        } else if (mode === 'calibrate') {
-          activeModeBadge.innerText = 'Калибрация';
-          statusMessage.innerText = 'Начертайте отсечка върху предмет с известен размер';
+      // Draw floating AR Badge with distance text
+      function drawARBadge(x, y, text, badgeBg = '#0f172a') {
+        ctx.save();
+        ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+        const metrics = ctx.measureText(text);
+        const padX = 10;
+        const padY = 5;
+        const w = metrics.width + padX * 2;
+        const h = 24;
+        const rx = x - w / 2;
+        const ry = y - h / 2;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.roundRect(rx, ry, w, h, 8);
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowBlur = 0;
+        ctx.fillText(text, x, y);
+        ctx.restore();
+      }
+
+      // Mode switching
+      const modeTabs = document.querySelectorAll('.mode-tab');
+      modeTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+          modeTabs.forEach(t => {
+            t.classList.remove('bg-blue-600', 'text-white');
+            t.classList.add('text-slate-300');
+          });
+          tab.classList.add('bg-blue-600', 'text-white');
+          tab.classList.remove('text-slate-300');
+
+          state.mode = tab.dataset.mode;
           state.points = [];
-        } else {
-          activeModeBadge.innerText = mode === 'line' ? 'Отсечка' : mode === 'polyline' ? 'Полилиния' : mode === 'angle' ? 'Ъгъл' : 'Полигон';
-          statusMessage.innerText = 'Докоснете екрана, за да поставите точки';
-        }
-        render();
-      }
 
-      // Camera streaming (WebRTC)
-      const btnToggleCamera = document.getElementById('btnToggleCamera');
-      const cameraText = document.getElementById('cameraText');
-      const cameraIcon = document.getElementById('cameraIcon');
+          if (state.mode === 'level') {
+            arLevelOverlay.classList.remove('hidden');
+            centerReticle.classList.add('hidden');
+            hudModeLabel.innerText = 'AR Нивелир';
+            hudStatus.innerText = 'Показва наклона и хоризонта на живо през камерата.';
+          } else {
+            arLevelOverlay.classList.add('hidden');
+            centerReticle.classList.remove('hidden');
 
-      async function toggleCamera() {
-        if (state.cameraActive) {
-          // Turn off
-          if (state.cameraStream) {
-            state.cameraStream.getTracks().forEach(t => t.stop());
-            state.cameraStream = null;
+            if (state.mode === 'line') {
+              hudModeLabel.innerText = 'AR Отсечка';
+              hudStatus.innerText = 'Прицелете точка А и натиснете „Постави точка“.';
+            } else if (state.mode === 'polyline') {
+              hudModeLabel.innerText = 'AR Полилиния';
+              hudStatus.innerText = 'Добавяйте точки за измерване на път/обиколка.';
+            } else if (state.mode === 'angle') {
+              hudModeLabel.innerText = 'AR Ъгъл';
+              hudStatus.innerText = 'Поставете 3 точки за измерване на ъгъл.';
+            } else if (state.mode === 'height') {
+              hudModeLabel.innerText = 'AR Височина';
+              hudStatus.innerText = '1. Прицелете основата на обекта и натиснете бутона.';
+            }
           }
-          video.classList.add('hidden');
-          state.cameraActive = false;
-          cameraText.innerText = 'Включи камера';
-          cameraIcon.innerText = '📷';
-          gridBg.classList.remove('hidden');
-        } else {
-          try {
-            const constraints = {
-              video: {
-                facingMode: { ideal: 'environment' },
-                width: { ideal: 1920 },
-                height: { ideal: 1080 }
-              }
-            };
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            state.cameraStream = stream;
-            video.srcObject = stream;
-            video.classList.remove('hidden');
-            gridBg.classList.add('hidden');
-            state.cameraActive = true;
-            cameraText.innerText = 'Спри камера';
-            cameraIcon.innerText = '🛑';
-          } catch (err) {
-            alert('Грешка при достъп до камерата: ' + err.message + '\nУверете се, че сте дали разрешение за камера в браузъра.');
-          }
-        }
-      }
-      btnToggleCamera.addEventListener('click', toggleCamera);
-
-      // Upload reference image
-      const fileInput = document.getElementById('fileInput');
-      fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            refImg.src = event.target.result;
-            refImg.classList.remove('hidden');
-            gridBg.classList.add('hidden');
-          };
-          reader.readAsDataURL(file);
-        }
+        });
       });
 
-      // Toggle grid
-      document.getElementById('btnToggleGrid').addEventListener('click', () => {
-        gridBg.classList.toggle('hidden');
+      // Unit change
+      unitSelector.addEventListener('change', (e) => {
+        state.unit = e.target.value;
       });
 
-      // Calibration Modal logic
-      const calibModal = document.getElementById('calibrationModal');
-      document.getElementById('btnCloseCalib').addEventListener('click', () => {
+      // Calibration Modal
+      btnOpenCalib.addEventListener('click', () => {
+        calibModal.classList.remove('hidden');
+      });
+
+      btnCloseCalibModal.addEventListener('click', () => {
         calibModal.classList.add('hidden');
       });
 
-      // Presets
-      document.querySelectorAll('.preset-btn').forEach(btn => {
+      btnSaveCalib.addEventListener('click', () => {
+        calibModal.classList.add('hidden');
+      });
+
+      document.querySelectorAll('.btn-calib-preset').forEach(btn => {
         btn.addEventListener('click', () => {
-          const size = parseFloat(btn.dataset.refSize);
-          const unit = btn.dataset.refUnit;
-          applyCalibration(size, unit);
-        });
-      });
-
-      document.getElementById('btnApplyCalibration').addEventListener('click', () => {
-        const size = parseFloat(document.getElementById('customRefLength').value);
-        const unit = document.getElementById('customRefUnit').value;
-        applyCalibration(size, unit);
-      });
-
-      document.getElementById('btnResetCalibration').addEventListener('click', () => {
-        state.pixelsPerCm = 10.0;
-        updateScaleText();
-        calibModal.classList.add('hidden');
-        render();
-      });
-
-      function applyCalibration(realSize, unit) {
-        if (state.points.length < 2) {
-          alert('Моля, първо начертайте линия с 2 точки върху обекта!');
-          return;
-        }
-        const pxDistance = dist(state.points[0], state.points[1]);
-        if (pxDistance < 5) {
-          alert('Отсечката е твърде къса за точна калибрация.');
-          return;
-        }
-
-        // Convert realSize to cm
-        let sizeInCm = realSize;
-        if (unit === 'mm') sizeInCm = realSize / 10;
-        else if (unit === 'm') sizeInCm = realSize * 100;
-        else if (unit === 'in') sizeInCm = realSize * 2.54;
-
-        state.pixelsPerCm = pxDistance / sizeInCm;
-        updateScaleText();
-        calibModal.classList.add('hidden');
-        setMode('line');
-        alert(`Калибрацията е успешна! ${state.pixelsPerCm.toFixed(1)} пиксела = 1 cm`);
-      }
-
-      function updateScaleText() {
-        scaleRatioText.innerText = `${(state.pixelsPerCm).toFixed(1)} px = 1.0 cm`;
-      }
-
-      // Spirit Level / DeviceOrientation handling
-      const levelBubble = document.getElementById('levelBubble');
-      const rollAngleText = document.getElementById('rollAngle');
-      const pitchAngleText = document.getElementById('pitchAngle');
-      const levelStatusText = document.getElementById('levelStatusText');
-      const levelDot = document.getElementById('levelDot');
-      const levelStatusBadge = document.getElementById('levelStatusBadge');
-
-      function updateLevelDisplay(roll, pitch) {
-        state.currentTilt.roll = roll;
-        state.currentTilt.pitch = pitch;
-
-        const effectiveRoll = roll - state.zeroOffset.roll;
-        const effectivePitch = pitch - state.zeroOffset.pitch;
-
-        rollAngleText.innerText = `${effectiveRoll >= 0 ? '+' : ''}${effectiveRoll.toFixed(1)}°`;
-        pitchAngleText.innerText = `${effectivePitch >= 0 ? '+' : ''}${effectivePitch.toFixed(1)}°`;
-
-        // Clinometer update
-        document.getElementById('clinoCurrentAngle').innerText = `${effectivePitch.toFixed(1)}°`;
-
-        // Move 2D bubble within 256px container (radius = 128 - bubble radius 24 = 104px max)
-        const maxOffset = 90;
-        const clampRoll = Math.max(-45, Math.min(45, effectiveRoll));
-        const clampPitch = Math.max(-45, Math.min(45, effectivePitch));
-        
-        const offsetX = (clampRoll / 45) * maxOffset;
-        const offsetY = (clampPitch / 45) * maxOffset;
-
-        levelBubble.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
-
-        // Check if level (threshold <= 0.5 deg)
-        const isLevel = Math.abs(effectiveRoll) <= 0.5 && Math.abs(effectivePitch) <= 0.5;
-        if (isLevel) {
-          levelStatusText.innerText = 'Перфектно Нивелирано! (0.0°)';
-          levelDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping';
-          levelStatusBadge.className = 'px-4 py-1.5 rounded-full text-xs font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 flex items-center gap-2';
-          playLevelBeep();
-        } else {
-          levelStatusText.innerText = 'Ненивелирано';
-          levelDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
-          levelStatusBadge.className = 'px-4 py-1.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-2';
-        }
-      }
-
-      // Device Orientation Event Listener
-      if (window.DeviceOrientationEvent) {
-        window.addEventListener('deviceorientation', (e) => {
-          if (e.gamma !== null && e.beta !== null) {
-            // gamma = roll [-90, 90], beta = pitch [-180, 180]
-            updateLevelDisplay(e.gamma, e.beta);
+          const targetCm = parseFloat(btn.dataset.calibSize);
+          if (state.points.length >= 2) {
+            const pxDist = calcDistance(state.points[0], state.points[1]);
+            state.pixelsPerCm = pxDist / targetCm;
+            alert(`Успешна калибрация: ${state.pixelsPerCm.toFixed(1)} px = 1 cm!`);
+            calibModal.classList.add('hidden');
+          } else {
+            alert('Първо начертайте линия с 2 точки върху обекта с познат размер!');
           }
         });
-      }
-
-      // Desktop test sliders
-      document.getElementById('simRoll').addEventListener('input', (e) => {
-        updateLevelDisplay(parseFloat(e.target.value), parseFloat(document.getElementById('simPitch').value));
-      });
-      document.getElementById('simPitch').addEventListener('input', (e) => {
-        updateLevelDisplay(parseFloat(document.getElementById('simRoll').value), parseFloat(e.target.value));
       });
 
-      // Calibrate Zero button for level
-      document.getElementById('btnCalibrateZero').addEventListener('click', () => {
-        state.zeroOffset.roll = state.currentTilt.roll;
-        state.zeroOffset.pitch = state.currentTilt.pitch;
-        alert('Текущата равнина е приета за 0.0° (Нулирано).');
+      document.getElementById('phoneHeightSlider').addEventListener('input', (e) => {
+        state.userPhoneHeightMeters = parseFloat(e.target.value);
+        document.getElementById('phoneHeightLabel').innerText = `${state.userPhoneHeightMeters.toFixed(2)} m`;
       });
-
-      // Sound toggle
-      const btnSound = document.getElementById('btnSoundToggle');
-      btnSound.addEventListener('click', () => {
-        state.soundEnabled = !state.soundEnabled;
-        btnSound.innerText = state.soundEnabled ? '🔊 Звук: Вкл' : '🔇 Звук: Изкл';
-      });
-
-      // Clinometer Height calculation
-      const btnLockBase = document.getElementById('btnLockBase');
-      const btnLockTop = document.getElementById('btnLockTop');
-      const clinoResultHeight = document.getElementById('clinoResultHeight');
-
-      btnLockBase.addEventListener('click', () => {
-        state.clino.baseAngle = state.currentTilt.pitch;
-        state.clino.hasBase = true;
-        btnLockBase.classList.add('bg-emerald-700');
-        btnLockBase.innerText = `✓ Основа: ${state.clino.baseAngle.toFixed(1)}°`;
-        calculateClinoHeight();
-      });
-
-      btnLockTop.addEventListener('click', () => {
-        state.clino.topAngle = state.currentTilt.pitch;
-        state.clino.hasTop = true;
-        btnLockTop.classList.add('bg-emerald-600');
-        btnLockTop.innerText = `✓ Връх: ${state.clino.topAngle.toFixed(1)}°`;
-        calculateClinoHeight();
-      });
-
-      function calculateClinoHeight() {
-        if (!state.clino.hasTop) return;
-        const d = parseFloat(document.getElementById('clinoDistance').value) || 5;
-        const eyeH = parseFloat(document.getElementById('clinoEyeHeight').value) || 1.6;
-        
-        // Simple trigonometry: H = d * tan(topAngle) + eyeH
-        // (Assuming standard upright holding where top angle is tilted up relative to horizontal)
-        const rad = Math.abs(state.clino.topAngle) * (Math.PI / 180);
-        const calculatedH = d * Math.tan(rad) + eyeH;
-        clinoResultHeight.innerText = `${calculatedH.toFixed(2)} m`;
-      }
-
-      // Export / Screenshot
-      document.getElementById('btnExport').addEventListener('click', () => {
-        // Create an offscreen merge canvas
-        const exportCanvas = document.createElement('canvas');
-        exportCanvas.width = canvas.width;
-        exportCanvas.height = canvas.height;
-        const expCtx = exportCanvas.getContext('2d');
-
-        // Draw background if video or image
-        if (state.cameraActive && video.videoWidth) {
-          expCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        } else if (!refImg.classList.contains('hidden') && refImg.naturalWidth) {
-          expCtx.drawImage(refImg, 0, 0, canvas.width, canvas.height);
-        } else {
-          expCtx.fillStyle = '#020617';
-          expCtx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-
-        // Draw measurements on top
-        expCtx.drawImage(canvas, 0, 0);
-
-        // Watermark / timestamp
-        expCtx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        expCtx.font = '12px sans-serif';
-        expCtx.fillText(`Умен Измервател • ${new Date().toLocaleString('bg-BG')}`, 14, canvas.height - 14);
-
-        // Trigger download
-        const a = document.createElement('a');
-        a.download = `measure-${Date.now()}.png`;
-        a.href = exportCanvas.toDataURL('image/png');
-        a.click();
-      });
-
-      // Initial layout & startup
-      setTimeout(() => {
-        resizeCanvas();
-        updateScaleText();
-      }, 100);
 
     })();
   </script>
