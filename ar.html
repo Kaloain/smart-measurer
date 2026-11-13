@@ -1,0 +1,1420 @@
+<!DOCTYPE html>
+<html lang="bg" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>AR Реалност - Рисуване & 3D Обекти в Пространството</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  
+  <!-- Three.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <style>
+    * {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #030712;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      touch-action: none;
+    }
+    /* Blur panels and controls */
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .glass-btn {
+      background: rgba(30, 41, 59, 0.8);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      transition: all 0.15s ease;
+    }
+    .glass-btn:active {
+      transform: scale(0.94);
+      background: rgba(59, 130, 246, 0.5);
+    }
+    .glass-btn.active {
+      background: #3b82f6;
+      border-color: #60a5fa;
+      color: white;
+      box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+    }
+    /* Reticle animation */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.7; }
+      50% { transform: scale(1.05); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.7; }
+    }
+    .reticle-pulse {
+      animation: pulse-ring 2s infinite ease-in-out;
+    }
+    /* Hide scrollbars */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="relative w-full h-full text-slate-100 flex flex-col justify-between">
+
+  <!-- Three.js 3D Viewport Canvas Container -->
+  <div id="canvasContainer" class="absolute inset-0 w-full h-full z-0 overflow-hidden">
+    <!-- Fallback Video Camera for iOS / Non-WebXR browsers -->
+    <video id="cameraFeed" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover hidden pointer-events-none z-0"></video>
+  </div>
+
+  <!-- HUD TOP BAR -->
+  <header class="relative z-20 pt-safe px-3 py-2 flex items-center justify-between pointer-events-none">
+    <!-- Left: Logo & AR Status -->
+    <div class="flex items-center gap-2 pointer-events-auto">
+      <a href="index.html" class="glass-btn p-2 rounded-xl flex items-center justify-center text-slate-300 hover:text-white" title="Към главния измервател">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+      </a>
+      <div class="glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-lg">
+        <span id="statusIndicator" class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+        <div class="leading-tight">
+          <div class="text-xs font-bold tracking-wide flex items-center gap-1.5">
+            <span>AR Студио</span>
+            <span id="arModeBadge" class="text-[9px] bg-blue-500/30 text-blue-300 px-1.5 py-0.2 rounded border border-blue-400/30">Сензор AR</span>
+          </div>
+          <p id="trackingStatusText" class="text-[10px] text-slate-300">Насочете камерата към равна повърхност</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Quick Actions (Undo, Clear, Snapshot, Help, QR) -->
+    <div class="flex items-center gap-1.5 pointer-events-auto">
+      <button id="btnWebXR" class="glass-btn px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30 flex items-center gap-1">
+        <span>🥽</span> <span id="xrBtnText">WebXR AR</span>
+      </button>
+
+      <button id="btnSnapshot" class="glass-btn p-2 rounded-xl text-slate-200 hover:text-white" title="Направи снимка">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      </button>
+
+      <button id="btnUndo" class="glass-btn p-2 rounded-xl text-slate-200 hover:text-white" title="Назад (Undo)">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+      </button>
+
+      <button id="btnClear" class="glass-btn p-2 rounded-xl text-rose-300 hover:text-rose-200" title="Изчисти всичко">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+      </button>
+
+      <button id="btnQR" class="glass-btn p-2 rounded-xl text-amber-300 hover:text-amber-200" title="QR Код за телефон">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- CENTER GUIDANCE HINT -->
+  <div id="reticleGuide" class="relative z-10 mx-auto text-center pointer-events-none transition-opacity duration-300">
+    <div class="glass-panel px-4 py-1.5 rounded-full text-xs text-slate-200 inline-flex items-center gap-2 shadow-xl border border-blue-500/30">
+      <span class="w-2 h-2 rounded-full bg-blue-400 animate-ping"></span>
+      <span id="centerInstruction">Докоснете екрана, за да започнете</span>
+    </div>
+  </div>
+
+  <!-- FLOATING TRANSFORM / OBJECT CONTROLS (Shows when an object is selected) -->
+  <div id="objectSelectedBar" class="relative z-20 mx-auto glass-panel px-3 py-2 rounded-2xl flex items-center gap-2 shadow-2xl border border-amber-500/40 hidden pointer-events-auto">
+    <span class="text-xs font-semibold text-amber-300">Избран обект:</span>
+    <button id="btnObjScaleDown" class="glass-btn px-2 py-1 rounded-lg text-xs font-bold">- Мащаб</button>
+    <button id="btnObjScaleUp" class="glass-btn px-2 py-1 rounded-lg text-xs font-bold">+ Мащаб</button>
+    <button id="btnObjRotate" class="glass-btn px-2 py-1 rounded-lg text-xs font-bold">↻ Завърти</button>
+    <button id="btnObjDelete" class="glass-btn px-2 py-1 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-900/50">🗑️ Изтрий</button>
+    <button id="btnObjDeselect" class="glass-btn px-2 py-1 rounded-lg text-xs">✕ Готово</button>
+  </div>
+
+  <!-- BOTTOM CONTROL DOCK -->
+  <footer class="relative z-20 pb-safe px-3 pb-3 flex flex-col gap-2">
+    
+    <!-- SUB-PANEL: Drawing Brush & Style Settings (Visible when DRAW mode is active) -->
+    <div id="drawSettingsPanel" class="glass-panel p-2.5 rounded-2xl flex flex-col gap-2 shadow-xl transition-all">
+      <!-- Row 1: Plane Target & Style -->
+      <div class="flex items-center justify-between gap-2 text-xs">
+        <div class="flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-700/60">
+          <button id="btnDrawSurface" class="px-2.5 py-1 rounded-lg font-medium text-[11px] bg-blue-600 text-white shadow">
+            Повърхност
+          </button>
+          <button id="btnDrawAir" class="px-2.5 py-1 rounded-lg font-medium text-[11px] text-slate-400 hover:text-white">
+            Във въздуха (3D)
+          </button>
+        </div>
+
+        <!-- Brush Style Selector -->
+        <div class="flex items-center gap-1">
+          <span class="text-[11px] text-slate-400">Ефект:</span>
+          <select id="brushStyle" class="bg-slate-800 border border-slate-700 text-[11px] rounded-lg px-2 py-1 text-slate-200 focus:outline-none">
+            <option value="neon">⚡ Неон (Светещ)</option>
+            <option value="tube">🖌️ 3D Туба</option>
+            <option value="ribbon">🎗️ 3D Лента</option>
+            <option value="pen">✏️ Тънък писец</option>
+            <option value="dots">🟡 Пунктир</option>
+          </select>
+        </div>
+
+        <!-- Brush Width Slider -->
+        <div class="flex items-center gap-1.5">
+          <span class="text-[11px] text-slate-400">Дебелина</span>
+          <input id="brushSize" type="range" min="0.005" max="0.06" step="0.002" value="0.015" class="w-16 accent-blue-500">
+        </div>
+      </div>
+
+      <!-- Row 2: Color Palette -->
+      <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+        <span class="text-[11px] text-slate-400 shrink-0">Цвят:</span>
+        <button data-color="#00f0ff" class="color-btn w-6 h-6 rounded-full border-2 border-white shrink-0 bg-[#00f0ff] shadow-sm"></button>
+        <button data-color="#10b981" class="color-btn w-6 h-6 rounded-full border border-slate-600 shrink-0 bg-[#10b981]"></button>
+        <button data-color="#ef4444" class="color-btn w-6 h-6 rounded-full border border-slate-600 shrink-0 bg-[#ef4444]"></button>
+        <button data-color="#f59e0b" class="color-btn w-6 h-6 rounded-full border border-slate-600 shrink-0 bg-[#f59e0b]"></button>
+        <button data-color="#a855f7" class="color-btn w-6 h-6 rounded-full border border-slate-600 shrink-0 bg-[#a855f7]"></button>
+        <button data-color="#ec4899" class="color-btn w-6 h-6 rounded-full border border-slate-600 shrink-0 bg-[#ec4899]"></button>
+        <button data-color="#ffffff" class="color-btn w-6 h-6 rounded-full border border-slate-600 shrink-0 bg-[#ffffff]"></button>
+        <button data-color="#eab308" class="color-btn w-6 h-6 rounded-full border border-slate-600 shrink-0 bg-[#eab308]"></button>
+        <label class="w-6 h-6 rounded-full border border-slate-500 shrink-0 flex items-center justify-center cursor-pointer bg-slate-800 text-[10px]" title="Избери цвят">
+          🎨
+          <input type="color" id="customColorPicker" value="#00f0ff" class="opacity-0 absolute w-0 h-0">
+        </label>
+      </div>
+    </div>
+
+    <!-- SUB-PANEL: 3D Objects Catalog (Visible when 3D OBJECTS mode is active) -->
+    <div id="objectsCatalogPanel" class="glass-panel p-2.5 rounded-2xl flex flex-col gap-2 shadow-xl hidden">
+      <div class="flex items-center justify-between text-xs text-slate-300">
+        <span class="font-semibold">Изберете 3D обект за поставяне:</span>
+        <span class="text-[10px] text-blue-400">Натиснете и маркирайте в реалността</span>
+      </div>
+      <div class="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+        <!-- 3D Primitives & Items -->
+        <button data-3d="box" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">📦</span>
+          <span>Куб</span>
+        </button>
+        <button data-3d="sphere" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">🔮</span>
+          <span>Сфера</span>
+        </button>
+        <button data-3d="cylinder" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">🏛️</span>
+          <span>Колона</span>
+        </button>
+        <button data-3d="pyramid" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">🔺</span>
+          <span>Пирамида</span>
+        </button>
+        <button data-3d="donut" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">🍩</span>
+          <span>Торус</span>
+        </button>
+        <button data-3d="chair" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">🪑</span>
+          <span>Стол</span>
+        </button>
+        <button data-3d="table" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">☕</span>
+          <span>Масичка</span>
+        </button>
+        <button data-3d="plant" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">🪴</span>
+          <span>Растение</span>
+        </button>
+        <button data-3d="lamp" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">💡</span>
+          <span>Лампа</span>
+        </button>
+        <button data-3d="car" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">🚗</span>
+          <span>Кола</span>
+        </button>
+        <button data-3d="portal" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">🌀</span>
+          <span>Портал</span>
+        </button>
+        <button data-3d="arrow" class="obj3d-btn px-3 py-2 rounded-xl glass-btn flex flex-col items-center gap-1 shrink-0 text-xs">
+          <span class="text-xl">📍</span>
+          <span>Маркер</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- SUB-PANEL: 2D Stickers & Text (Visible when 2D mode is active) -->
+    <div id="stickersPanel" class="glass-panel p-2.5 rounded-2xl flex flex-col gap-2 shadow-xl hidden">
+      <!-- Custom Text creation -->
+      <div class="flex items-center gap-2">
+        <input id="customTextInput" type="text" placeholder="Напишете 3D текст или бележка..." class="flex-1 bg-slate-900 border border-slate-700 text-xs rounded-xl px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:border-blue-500">
+        <button id="btnCreateText" class="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shrink-0">
+          Постави текст
+        </button>
+      </div>
+
+      <!-- 2D Sticker Badges -->
+      <div class="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+        <span class="text-[11px] text-slate-400 shrink-0">Стикери:</span>
+        <button data-sticker="⚠️ ВНИМАНИЕ" class="sticker-btn px-2.5 py-1.5 rounded-lg glass-btn text-xs font-medium shrink-0">⚠️ Внимание</button>
+        <button data-sticker="✅ ОДОБРЕНО" class="sticker-btn px-2.5 py-1.5 rounded-lg glass-btn text-xs font-medium shrink-0">✅ Одобрено</button>
+        <button data-sticker="🎯 ЦЕЛ" class="sticker-btn px-2.5 py-1.5 rounded-lg glass-btn text-xs font-medium shrink-0">🎯 Мишена</button>
+        <button data-sticker="🛑 СТОП" class="sticker-btn px-2.5 py-1.5 rounded-lg glass-btn text-xs font-medium shrink-0">🛑 Стоп</button>
+        <button data-sticker="❤️ СЪРЦЕ" class="sticker-btn px-2.5 py-1.5 rounded-lg glass-btn text-xs font-medium shrink-0">❤️ Сърце</button>
+        <button data-sticker="🔥 ЗОНА" class="sticker-btn px-2.5 py-1.5 rounded-lg glass-btn text-xs font-medium shrink-0">🔥 Огън</button>
+        <button data-sticker="📐 МРЕЖА" class="sticker-btn px-2.5 py-1.5 rounded-lg glass-btn text-xs font-medium shrink-0">📐 2D Чертеж</button>
+      </div>
+    </div>
+
+    <!-- MAIN BOTTOM TAB BAR -->
+    <div class="glass-panel p-1.5 rounded-2xl flex items-center justify-around shadow-2xl">
+      <!-- Tab 1: Draw / Write -->
+      <button id="tabDraw" class="tab-btn flex-1 py-2 px-2 rounded-xl flex flex-col items-center gap-1 active text-blue-400 font-semibold text-xs transition">
+        <span class="text-lg">✏️</span>
+        <span>Рисуване</span>
+      </button>
+
+      <!-- Tab 2: 3D Objects -->
+      <button id="tabObjects" class="tab-btn flex-1 py-2 px-2 rounded-xl flex flex-col items-center gap-1 text-slate-400 hover:text-slate-200 font-semibold text-xs transition">
+        <span class="text-lg">📦</span>
+        <span>3D Обекти</span>
+      </button>
+
+      <!-- Tab 3: 2D & Text -->
+      <button id="tabStickers" class="tab-btn flex-1 py-2 px-2 rounded-xl flex flex-col items-center gap-1 text-slate-400 hover:text-slate-200 font-semibold text-xs transition">
+        <span class="text-lg">🏷️</span>
+        <span>2D & Текст</span>
+      </button>
+
+      <!-- Tab 4: AR Ruler / Measure -->
+      <button id="tabMeasure" class="tab-btn flex-1 py-2 px-2 rounded-xl flex flex-col items-center gap-1 text-slate-400 hover:text-slate-200 font-semibold text-xs transition">
+        <span class="text-lg">📏</span>
+        <span>AR Рулетка</span>
+      </button>
+    </div>
+  </footer>
+
+  <!-- MODAL: QR Code for Phone Access -->
+  <div id="qrModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel max-w-sm w-full p-6 rounded-3xl flex flex-col items-center gap-4 text-center border border-slate-700 shadow-2xl">
+      <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-2xl shadow-lg shadow-blue-500/30">
+        📱
+      </div>
+      <div>
+        <h3 class="text-lg font-bold text-white">Отвори на телефона за истинско AR!</h3>
+        <p class="text-xs text-slate-300 mt-1">Сканирайте този QR код с камерата на телефона си, за да рисувате и поставяте 3D обекти във вашия реален дом или офис.</p>
+      </div>
+
+      <!-- QR Code Container -->
+      <div id="qrContainer" class="p-3 bg-white rounded-2xl shadow-inner flex items-center justify-center">
+        <!-- SVG QR code inserted via JS -->
+      </div>
+
+      <div class="w-full flex flex-col gap-2">
+        <input id="qrUrlInput" type="text" readonly class="w-full bg-slate-900 border border-slate-700 text-xs text-center rounded-xl py-2 px-3 text-blue-400 select-all font-mono">
+        <button id="btnCopyUrl" class="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-lg transition">
+          Копирай линка
+        </button>
+        <button id="btnCloseQR" class="w-full py-2 rounded-xl glass-btn text-xs font-semibold text-slate-300 hover:text-white transition">
+          Затвори
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPT: Complete WebAR, 3D Engine & Drawing Implementation -->
+  <script>
+    // --- Application State ---
+    const state = {
+      mode: 'draw', // 'draw', 'objects', 'stickers', 'measure'
+      drawPlane: 'surface', // 'surface' or 'air'
+      brushStyle: 'neon', // 'neon', 'tube', 'ribbon', 'pen', 'dots'
+      brushColor: '#00f0ff',
+      brushSize: 0.015, // in meters
+      selected3DType: 'box',
+      selectedStickerText: '⚠️ ВНИМАНИЕ',
+      selectedObject: null, // Selected placed 3D object
+      xrSession: null,
+      xrRefSpace: null,
+      xrHitTestSource: null,
+      isWebXRActive: false,
+      cameraStreamActive: false,
+      airDrawDepth: 0.5, // 50cm in front of camera
+      isPointerDown: false,
+      currentStrokePoints: [],
+      currentStrokeMesh: null,
+      allStrokesAndObjects: [], // For undo functionality
+      measurePoints: [],
+      measureLineMesh: null,
+      measureTextSprite: null
+    };
+
+    // --- Audio Feedback (Web Audio API Synthesizer) ---
+    const AudioEngine = {
+      ctx: null,
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) this.ctx = new AudioContext();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      },
+      playPop() {
+        this.init();
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(350, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(700, this.ctx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.08);
+      },
+      playDrawTone() {
+        this.init();
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(520, this.ctx.currentTime);
+        gain.gain.setValueAtTime(0.04, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.05);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.05);
+      },
+      playTrash() {
+        this.init();
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(220, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80, this.ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.15);
+      }
+    };
+
+    // --- Three.js Setup ---
+    const container = document.getElementById('canvasContainer');
+    const scene = new THREE.Scene();
+
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
+    camera.position.set(0, 1.2, 1.8);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    // Realistic Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(2, 4, 3);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.near = 0.1;
+    dirLight.shadow.camera.far = 10;
+    dirLight.shadow.camera.left = -3;
+    dirLight.shadow.camera.right = 3;
+    dirLight.shadow.camera.top = 3;
+    dirLight.shadow.camera.bottom = -3;
+    dirLight.shadow.bias = -0.001;
+    scene.add(dirLight);
+
+    // Real-world Shadow Receiver Plane
+    // This invisible plane catches soft shadows from placed 3D objects and drawings onto physical tables/floors!
+    const shadowPlaneGeo = new THREE.PlaneGeometry(30, 30);
+    const shadowPlaneMat = new THREE.ShadowMaterial({ opacity: 0.45 });
+    const shadowPlane = new THREE.Mesh(shadowPlaneGeo, shadowPlaneMat);
+    shadowPlane.rotation.x = -Math.PI / 2;
+    shadowPlane.position.y = 0;
+    shadowPlane.receiveShadow = true;
+    scene.add(shadowPlane);
+
+    // Studio Grid (for fallback or simulation mode)
+    const studioGrid = new THREE.GridHelper(10, 20, 0x3b82f6, 0x1e293b);
+    studioGrid.position.y = -0.001;
+    scene.add(studioGrid);
+
+    // AR Reticle (Visual 3D Ring indicating detected physical surface)
+    const reticleGroup = new THREE.Group();
+    reticleGroup.visible = false;
+
+    // Outer Ring
+    const ringGeo = new THREE.RingGeometry(0.08, 0.095, 32);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide });
+    const reticleRing = new THREE.Mesh(ringGeo, ringMat);
+    reticleRing.rotation.x = -Math.PI / 2;
+    reticleGroup.add(reticleRing);
+
+    // Inner Dot
+    const dotGeo = new THREE.CircleGeometry(0.015, 16);
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    const reticleDot = new THREE.Mesh(dotGeo, dotMat);
+    reticleDot.rotation.x = -Math.PI / 2;
+    reticleGroup.add(reticleDot);
+
+    // 4 Crosshairs
+    for (let i = 0; i < 4; i++) {
+      const armGeo = new THREE.PlaneGeometry(0.03, 0.006);
+      const arm = new THREE.Mesh(armGeo, ringMat);
+      arm.rotation.x = -Math.PI / 2;
+      arm.rotation.z = (i * Math.PI) / 2;
+      arm.position.x = Math.cos((i * Math.PI) / 2) * 0.12;
+      arm.position.z = Math.sin((i * Math.PI) / 2) * 0.12;
+      reticleGroup.add(arm);
+    }
+    scene.add(reticleGroup);
+
+    // World root group where all user creations live
+    const worldGroup = new THREE.Group();
+    scene.add(worldGroup);
+
+    // Raycaster for hit-testing in non-WebXR fallback mode
+    const raycaster = new THREE.Raycaster();
+    const touchVector = new THREE.Vector2();
+    const virtualPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+    // --- Procedural Canvas Textures for Realistic Materials ---
+    function createWoodTexture() {
+      const c = document.createElement('canvas');
+      c.width = 512;
+      c.height = 512;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#8b5a2b';
+      ctx.fillRect(0, 0, 512, 512);
+      ctx.fillStyle = '#5c3a1e';
+      for (let i = 0; i < 50; i++) {
+        ctx.fillRect(0, Math.random() * 512, 512, Math.random() * 8 + 2);
+      }
+      return new THREE.CanvasTexture(c);
+    }
+
+    function createMarbleTexture() {
+      const c = document.createElement('canvas');
+      c.width = 512;
+      c.height = 512;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#f1f5f9';
+      ctx.fillRect(0, 0, 512, 512);
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 15; i++) {
+        ctx.beginPath();
+        ctx.moveTo(Math.random() * 512, 0);
+        ctx.bezierCurveTo(Math.random() * 512, 200, Math.random() * 512, 350, Math.random() * 512, 512);
+        ctx.stroke();
+      }
+      return new THREE.CanvasTexture(c);
+    }
+
+    // --- 3D Model Procedural Generators ---
+    function create3DObject(type) {
+      const group = new THREE.Group();
+      let mesh;
+
+      switch(type) {
+        case 'box': {
+          const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+          const mat = new THREE.MeshStandardMaterial({
+            color: state.brushColor,
+            roughness: 0.3,
+            metalness: 0.2,
+            map: createWoodTexture()
+          });
+          mesh = new THREE.Mesh(geo, mat);
+          mesh.position.y = 0.1;
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          group.add(mesh);
+          break;
+        }
+        case 'sphere': {
+          const geo = new THREE.SphereGeometry(0.12, 32, 32);
+          const mat = new THREE.MeshStandardMaterial({
+            color: state.brushColor,
+            roughness: 0.1,
+            metalness: 0.9
+          });
+          mesh = new THREE.Mesh(geo, mat);
+          mesh.position.y = 0.12;
+          mesh.castShadow = true;
+          group.add(mesh);
+          break;
+        }
+        case 'cylinder': {
+          const geo = new THREE.CylinderGeometry(0.09, 0.09, 0.35, 32);
+          const mat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.4,
+            map: createMarbleTexture()
+          });
+          mesh = new THREE.Mesh(geo, mat);
+          mesh.position.y = 0.175;
+          mesh.castShadow = true;
+          group.add(mesh);
+          break;
+        }
+        case 'pyramid': {
+          const geo = new THREE.ConeGeometry(0.15, 0.25, 4);
+          const mat = new THREE.MeshStandardMaterial({
+            color: 0xf59e0b,
+            roughness: 0.2,
+            metalness: 0.8
+          });
+          mesh = new THREE.Mesh(geo, mat);
+          mesh.position.y = 0.125;
+          mesh.rotation.y = Math.PI / 4;
+          mesh.castShadow = true;
+          group.add(mesh);
+          break;
+        }
+        case 'donut': {
+          const geo = new THREE.TorusGeometry(0.12, 0.04, 24, 48);
+          const mat = new THREE.MeshStandardMaterial({
+            color: state.brushColor,
+            roughness: 0.2,
+            metalness: 0.6
+          });
+          mesh = new THREE.Mesh(geo, mat);
+          mesh.position.y = 0.15;
+          mesh.rotation.x = Math.PI / 3;
+          mesh.castShadow = true;
+          group.add(mesh);
+          break;
+        }
+        case 'chair': {
+          // Modern minimal chair
+          const seatMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6 });
+          const legMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.8, roughness: 0.2 });
+
+          // Seat
+          const seat = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.3), seatMat);
+          seat.position.y = 0.25;
+          seat.castShadow = true;
+          group.add(seat);
+
+          // Backrest
+          const back = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.04), seatMat);
+          back.position.set(0, 0.42, -0.13);
+          back.castShadow = true;
+          group.add(back);
+
+          // 4 Legs
+          const legGeo = new THREE.CylinderGeometry(0.012, 0.008, 0.25, 16);
+          const positions = [
+            [-0.12, 0.125, -0.12],
+            [0.12, 0.125, -0.12],
+            [-0.12, 0.125, 0.12],
+            [0.12, 0.125, 0.12]
+          ];
+          positions.forEach(pos => {
+            const leg = new THREE.Mesh(legGeo, legMat);
+            leg.position.set(...pos);
+            leg.castShadow = true;
+            group.add(leg);
+          });
+          break;
+        }
+        case 'table': {
+          // Modern round coffee table
+          const topMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.3, map: createWoodTexture() });
+          const legMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.9, roughness: 0.1 });
+
+          const top = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.03, 32), topMat);
+          top.position.y = 0.3;
+          top.castShadow = true;
+          group.add(top);
+
+          const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.3, 16), legMat);
+          leg.position.y = 0.15;
+          leg.castShadow = true;
+          group.add(leg);
+
+          const base = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.02, 32), legMat);
+          base.position.y = 0.01;
+          base.castShadow = true;
+          group.add(base);
+          break;
+        }
+        case 'plant': {
+          // Ceramic pot
+          const potMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.2 });
+          const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.07, 0.18, 24), potMat);
+          pot.position.y = 0.09;
+          pot.castShadow = true;
+          group.add(pot);
+
+          // Plant leaves
+          const leafMat = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.4 });
+          for (let i = 0; i < 6; i++) {
+            const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.22, 6), leafMat);
+            leaf.position.set(0, 0.18, 0);
+            leaf.rotation.z = 0.4;
+            leaf.rotation.y = (i * Math.PI * 2) / 6;
+            leaf.castShadow = true;
+            group.add(leaf);
+          }
+          break;
+        }
+        case 'lamp': {
+          // Standing lamp with real point light!
+          const poleMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.7, roughness: 0.3 });
+          const shadeMat = new THREE.MeshStandardMaterial({ color: 0xfef08a, emissive: 0xfde047, emissiveIntensity: 0.6 });
+
+          const base = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.02, 24), poleMat);
+          base.position.y = 0.01;
+          group.add(base);
+
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.6, 16), poleMat);
+          pole.position.y = 0.3;
+          group.add(pole);
+
+          const shade = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.15, 24, 1, true), shadeMat);
+          shade.position.y = 0.62;
+          group.add(shade);
+
+          // Actual light!
+          const lampLight = new THREE.PointLight(0xfef08a, 1.2, 2);
+          lampLight.position.set(0, 0.6, 0);
+          group.add(lampLight);
+          break;
+        }
+        case 'car': {
+          // Stylized toy sports car
+          const bodyMat = new THREE.MeshStandardMaterial({ color: state.brushColor, metalness: 0.4, roughness: 0.2 });
+          const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 });
+
+          const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.07, 0.35), bodyMat);
+          body.position.y = 0.07;
+          body.castShadow = true;
+          group.add(body);
+
+          const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.18), new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.1 }));
+          cabin.position.set(0, 0.13, -0.02);
+          cabin.castShadow = true;
+          group.add(cabin);
+
+          // 4 Wheels
+          const wheelGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.025, 16);
+          wheelGeo.rotateZ(Math.PI / 2);
+          const wPositions = [
+            [-0.1, 0.035, 0.1],
+            [0.1, 0.035, 0.1],
+            [-0.1, 0.035, -0.1],
+            [0.1, 0.035, -0.1]
+          ];
+          wPositions.forEach(p => {
+            const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+            wheel.position.set(...p);
+            wheel.castShadow = true;
+            group.add(wheel);
+          });
+          break;
+        }
+        case 'portal': {
+          // Glowing sci-fi portal ring
+          const ringGeo = new THREE.TorusGeometry(0.25, 0.025, 24, 48);
+          const ringMat = new THREE.MeshStandardMaterial({ color: 0x6366f1, metalness: 0.9, roughness: 0.2 });
+          const ring = new THREE.Mesh(ringGeo, ringMat);
+          ring.position.y = 0.27;
+          ring.castShadow = true;
+          group.add(ring);
+
+          // Swirling portal surface
+          const portalDisc = new THREE.Mesh(
+            new THREE.CircleGeometry(0.23, 32),
+            new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+          );
+          portalDisc.position.y = 0.27;
+          group.add(portalDisc);
+          break;
+        }
+        case 'arrow': {
+          // Floating 3D Navigation Marker Pin
+          const pinMat = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xb91c1c, emissiveIntensity: 0.4 });
+          const head = new THREE.Mesh(new THREE.SphereGeometry(0.06, 24, 24), pinMat);
+          head.position.y = 0.28;
+          head.castShadow = true;
+          group.add(head);
+
+          const tip = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.16, 24), pinMat);
+          tip.position.y = 0.16;
+          tip.rotation.x = Math.PI;
+          tip.castShadow = true;
+          group.add(tip);
+          break;
+        }
+        default:
+          break;
+      }
+
+      // Add user selection hitbox/metadata
+      group.userData = { isUserItem: true, type: '3d_object', subType: type };
+      return group;
+    }
+
+    // --- 2D Text & Sticker Billboard Generator ---
+    function createTextOrStickerSprite(text, isSticker = false) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+
+      // Card Background with Glow
+      ctx.fillStyle = isSticker ? 'rgba(15, 23, 42, 0.92)' : 'rgba(30, 41, 59, 0.95)';
+      ctx.roundRect ? ctx.roundRect(16, 16, 480, 224, 32) : ctx.rect(16, 16, 480, 224);
+      ctx.fill();
+
+      // Border
+      ctx.strokeStyle = state.brushColor || '#38bdf8';
+      ctx.lineWidth = 10;
+      ctx.stroke();
+
+      // Text
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 44px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = state.brushColor;
+      ctx.shadowBlur = 12;
+      ctx.fillText(text, 256, 128);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.scale.set(0.4, 0.2, 1);
+      sprite.position.y = 0.15;
+
+      const group = new THREE.Group();
+      group.add(sprite);
+      group.userData = { isUserItem: true, type: 'sticker', text: text };
+      return group;
+    }
+
+    // --- 3D Finger Drawing Engine ---
+    function startDrawingStroke(startPoint) {
+      state.isPointerDown = true;
+      state.currentStrokePoints = [startPoint.clone()];
+
+      const strokeGroup = new THREE.Group();
+      strokeGroup.userData = {
+        isUserItem: true,
+        type: 'stroke',
+        style: state.brushStyle,
+        color: state.brushColor
+      };
+      scene.add(strokeGroup);
+      state.currentStrokeMesh = strokeGroup;
+      AudioEngine.playDrawTone();
+    }
+
+    function addPointToStroke(newPoint) {
+      if (!state.isPointerDown || !state.currentStrokeMesh) return;
+      const pts = state.currentStrokePoints;
+      const lastPt = pts[pts.length - 1];
+
+      // Minimum distance check to prevent jitter & excessive vertices
+      if (lastPt.distanceTo(newPoint) < 0.008) return;
+
+      pts.push(newPoint.clone());
+      rebuildStrokeMesh();
+    }
+
+    function endDrawingStroke() {
+      if (!state.isPointerDown) return;
+      state.isPointerDown = false;
+      if (state.currentStrokeMesh) {
+        state.allStrokesAndObjects.push(state.currentStrokeMesh);
+        state.currentStrokeMesh = null;
+        state.currentStrokePoints = [];
+      }
+    }
+
+    function rebuildStrokeMesh() {
+      const pts = state.currentStrokePoints;
+      const group = state.currentStrokeMesh;
+      if (!group || pts.length < 2) return;
+
+      // Clear previous sub-meshes in the group
+      while(group.children.length > 0) {
+        const child = group.children[0];
+        if (child.geometry) child.geometry.dispose();
+        group.remove(child);
+      }
+
+      if (state.brushStyle === 'dots') {
+        // Sparkle / Dotted Spheres along stroke
+        const dotGeo = new THREE.SphereGeometry(state.brushSize * 0.8, 12, 12);
+        const dotMat = new THREE.MeshBasicMaterial({ color: state.brushColor });
+        pts.forEach(p => {
+          const m = new THREE.Mesh(dotGeo, dotMat);
+          m.position.copy(p);
+          group.add(m);
+        });
+        return;
+      }
+
+      // Smooth Curve Interpolation
+      const curve = new THREE.CatmullRomCurve3(pts);
+      const tubularSegments = Math.max(8, pts.length * 6);
+      const radius = state.brushSize * 0.5;
+
+      if (state.brushStyle === 'neon') {
+        // Glowing Neon Tube with Emissive Material
+        const geo = new THREE.TubeGeometry(curve, tubularSegments, radius, 8, false);
+        const mat = new THREE.MeshStandardMaterial({
+          color: state.brushColor,
+          emissive: state.brushColor,
+          emissiveIntensity: 1.2,
+          roughness: 0.1,
+          metalness: 0.2
+        });
+        const m = new THREE.Mesh(geo, mat);
+        m.castShadow = true;
+        group.add(m);
+      } else if (state.brushStyle === 'pen') {
+        // Fine crisp line
+        const geo = new THREE.TubeGeometry(curve, tubularSegments, radius * 0.4, 6, false);
+        const mat = new THREE.MeshBasicMaterial({ color: state.brushColor });
+        const m = new THREE.Mesh(geo, mat);
+        group.add(m);
+      } else if (state.brushStyle === 'ribbon') {
+        // 3D Ribbon geometry
+        const geo = new THREE.TubeGeometry(curve, tubularSegments, radius * 1.5, 4, false);
+        const mat = new THREE.MeshStandardMaterial({
+          color: state.brushColor,
+          roughness: 0.4,
+          metalness: 0.5
+        });
+        const m = new THREE.Mesh(geo, mat);
+        m.castShadow = true;
+        group.add(m);
+      } else {
+        // Realistic 3D Solid Tube
+        const geo = new THREE.TubeGeometry(curve, tubularSegments, radius, 12, false);
+        const mat = new THREE.MeshStandardMaterial({
+          color: state.brushColor,
+          roughness: 0.3,
+          metalness: 0.3
+        });
+        const m = new THREE.Mesh(geo, mat);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        group.add(m);
+      }
+    }
+
+    // --- AR Measuring Tape Tool ---
+    function handleMeasureTap(point) {
+      state.measurePoints.push(point.clone());
+      AudioEngine.playPop();
+
+      // Pin marker at point
+      const pin = new THREE.Mesh(
+        new THREE.SphereGeometry(0.018, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xef4444 })
+      );
+      pin.position.copy(point);
+      worldGroup.add(pin);
+      state.allStrokesAndObjects.push(pin);
+
+      if (state.measurePoints.length === 2) {
+        const p1 = state.measurePoints[0];
+        const p2 = state.measurePoints[1];
+        const distMeters = p1.distanceTo(p2);
+        const distCm = (distMeters * 100).toFixed(1);
+
+        // Cylinder tape line
+        const midPoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+        const lineGeo = new THREE.CylinderGeometry(0.005, 0.005, distMeters, 12);
+        const lineMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0x854d0e });
+        const line = new THREE.Mesh(lineGeo, lineMat);
+        line.position.copy(midPoint);
+        line.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p2.clone().sub(p1).normalize());
+        worldGroup.add(line);
+        state.allStrokesAndObjects.push(line);
+
+        // Measurement Text Sprite
+        const sprite = createTextOrStickerSprite(`📏 ${distCm} cm`, true);
+        sprite.position.copy(midPoint);
+        sprite.position.y += 0.08;
+        worldGroup.add(sprite);
+        state.allStrokesAndObjects.push(sprite);
+
+        // Reset points for next measurement
+        state.measurePoints = [];
+        document.getElementById('centerInstruction').innerText = `Разстояние: ${distCm} cm! Маркирайте следваща точка.`;
+      } else {
+        document.getElementById('centerInstruction').innerText = 'Маркирайте втора точка за измерване...';
+      }
+    }
+
+    // --- Place Objects in Real Space ---
+    function placeItemAtPosition(pos, normal = new THREE.Vector3(0, 1, 0)) {
+      let newItem;
+      if (state.mode === 'objects') {
+        newItem = create3DObject(state.selected3DType);
+      } else if (state.mode === 'stickers') {
+        newItem = createTextOrStickerSprite(state.selectedStickerText, true);
+      }
+
+      if (newItem) {
+        newItem.position.copy(pos);
+        // Align to surface normal if applicable
+        if (normal.y < 0.9) {
+          newItem.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+        }
+        worldGroup.add(newItem);
+        state.allStrokesAndObjects.push(newItem);
+        AudioEngine.playPop();
+      }
+    }
+
+    // --- Pointer / Touch Input Handling ---
+    function getPointerIntersection(e) {
+      const clientX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
+      const clientY = e.clientY || (e.touches && e.touches[0].clientY) || 0;
+      touchVector.x = (clientX / window.innerWidth) * 2 - 1;
+      touchVector.y = -(clientY / window.innerHeight) * 2 + 1;
+
+      // In WebXR mode: Reticle provides real surface coordinates
+      if (state.isWebXRActive && reticleGroup.visible) {
+        return {
+          point: reticleGroup.position.clone(),
+          normal: new THREE.Vector3(0, 1, 0)
+        };
+      }
+
+      // Air Draw mode: Project point in front of camera at chosen depth
+      if (state.mode === 'draw' && state.drawPlane === 'air') {
+        const airPoint = new THREE.Vector3(touchVector.x, touchVector.y, 0.5);
+        airPoint.unproject(camera);
+        const dir = airPoint.sub(camera.position).normalize();
+        const pt = camera.position.clone().add(dir.multiplyScalar(state.airDrawDepth));
+        return { point: pt, normal: new THREE.Vector3(0, 1, 0) };
+      }
+
+      // Fallback raycast against virtual surface plane or placed objects
+      raycaster.setFromCamera(touchVector, camera);
+      const hit = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(virtualPlane, hit)) {
+        return { point: hit, normal: new THREE.Vector3(0, 1, 0) };
+      }
+
+      return null;
+    }
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      // Don't intercept touches on UI overlay elements
+      if (e.target !== renderer.domElement) return;
+
+      const inter = getPointerIntersection(e);
+      if (!inter) return;
+
+      if (state.mode === 'draw') {
+        startDrawingStroke(inter.point);
+      } else if (state.mode === 'measure') {
+        handleMeasureTap(inter.point);
+      } else if (state.mode === 'objects' || state.mode === 'stickers') {
+        placeItemAtPosition(inter.point, inter.normal);
+      }
+    });
+
+    renderer.domElement.addEventListener('pointermove', (e) => {
+      if (!state.isPointerDown || state.mode !== 'draw') return;
+      const inter = getPointerIntersection(e);
+      if (inter) {
+        addPointToStroke(inter.point);
+      }
+    });
+
+    window.addEventListener('pointerup', () => {
+      if (state.mode === 'draw') {
+        endDrawingStroke();
+      }
+    });
+
+    // --- WebXR Device API AR Implementation ---
+    const btnWebXR = document.getElementById('btnWebXR');
+    const xrBtnText = document.getElementById('xrBtnText');
+    const arModeBadge = document.getElementById('arModeBadge');
+    const trackingStatusText = document.getElementById('trackingStatusText');
+
+    async function checkWebXRSupport() {
+      if ('xr' in navigator) {
+        try {
+          const supported = await navigator.xr.isSessionSupported('immersive-ar');
+          if (supported) {
+            xrBtnText.innerText = 'Стартирай WebXR';
+            btnWebXR.classList.add('animate-pulse');
+            return true;
+          }
+        } catch (err) {
+          console.warn('WebXR check error:', err);
+        }
+      }
+      xrBtnText.innerText = 'Камера AR';
+      return false;
+    }
+    checkWebXRSupport();
+
+    async function toggleWebXR() {
+      if (state.xrSession) {
+        await state.xrSession.end();
+        return;
+      }
+
+      if ('xr' in navigator && await navigator.xr.isSessionSupported('immersive-ar')) {
+        try {
+          const session = await navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['hit-test'],
+            optionalFeatures: ['local-floor', 'bounded-floor']
+          });
+
+          session.addEventListener('end', onXRSessionEnded);
+          await renderer.xr.setSession(session);
+          state.xrSession = session;
+          state.isWebXRActive = true;
+
+          // Request Reference Space & Hit Test Source
+          const refSpace = await session.requestReferenceSpace('local-floor');
+          state.xrRefSpace = refSpace;
+
+          const viewerSpace = await session.requestReferenceSpace('viewer');
+          state.xrHitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+
+          arModeBadge.innerText = 'WebXR AR (ARCore)';
+          arModeBadge.className = 'text-[9px] bg-emerald-500/30 text-emerald-300 px-1.5 py-0.2 rounded border border-emerald-400/30';
+          trackingStatusText.innerText = 'WebXR активен. Насочете към пода или масата.';
+          studioGrid.visible = false;
+          xrBtnText.innerText = 'Спри AR';
+        } catch (err) {
+          console.error('Failed to start WebXR session:', err);
+          startCameraFallbackAR();
+        }
+      } else {
+        // Universal Camera Stream + Sensor Fallback
+        startCameraFallbackAR();
+      }
+    }
+
+    function onXRSessionEnded() {
+      state.xrSession = null;
+      state.xrHitTestSource = null;
+      state.isWebXRActive = false;
+      reticleGroup.visible = false;
+      studioGrid.visible = true;
+      arModeBadge.innerText = '3D Студио';
+      xrBtnText.innerText = 'WebXR AR';
+      btnWebXR.classList.remove('animate-pulse');
+    }
+
+    // --- Fallback Camera Stream + Device Orientation (For iOS / non-WebXR mobile) ---
+    async function startCameraFallbackAR() {
+      const video = document.getElementById('cameraFeed');
+      if (state.cameraStreamActive) {
+        // Stop stream
+        if (video.srcObject) {
+          video.srcObject.getTracks().forEach(t => t.stop());
+        }
+        video.classList.add('hidden');
+        state.cameraStreamActive = false;
+        studioGrid.visible = true;
+        arModeBadge.innerText = '3D Студио';
+        xrBtnText.innerText = 'Камера AR';
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false
+        });
+        video.srcObject = stream;
+        video.classList.remove('hidden');
+        await video.play();
+        state.cameraStreamActive = true;
+        studioGrid.visible = false;
+        arModeBadge.innerText = 'Камера AR';
+        arModeBadge.className = 'text-[9px] bg-indigo-500/30 text-indigo-300 px-1.5 py-0.2 rounded border border-indigo-400/30';
+        trackingStatusText.innerText = 'Камерата е активна! Рисувайте в пространството.';
+        xrBtnText.innerText = 'Спри Камера';
+
+        // Request Gyroscope on iOS 13+
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+          DeviceOrientationEvent.requestPermission().then(resp => {
+            if (resp === 'granted') {
+              window.addEventListener('deviceorientation', handleOrientation);
+            }
+          }).catch(console.warn);
+        } else {
+          window.addEventListener('deviceorientation', handleOrientation);
+        }
+      } catch (err) {
+        console.warn('Camera stream error:', err);
+        alert('Не можахме да стартираме камерата. Моля, разрешете достъп до камерата в настройките на браузъра си.');
+      }
+    }
+
+    function handleOrientation(e) {
+      if (!e.alpha) return;
+      // Convert device Euler angles (alpha, beta, gamma) to camera orientation
+      const alpha = THREE.MathUtils.degToRad(e.alpha);
+      const beta = THREE.MathUtils.degToRad(e.beta - 90);
+      const gamma = THREE.MathUtils.degToRad(e.gamma);
+      camera.rotation.set(beta, alpha, -gamma, 'YXZ');
+    }
+
+    btnWebXR.addEventListener('click', toggleWebXR);
+
+    // --- Main Render Loop (WebXR + Fallback Animation) ---
+    renderer.setAnimationLoop((timestamp, frame) => {
+      // 1. WebXR Hit-Testing for Ground / Table Surface Detection
+      if (frame && state.xrHitTestSource) {
+        const hitTestResults = frame.getHitTestResults(state.xrHitTestSource);
+        if (hitTestResults.length > 0) {
+          const hit = hitTestResults[0];
+          const pose = hit.getPose(state.xrRefSpace);
+          reticleGroup.visible = true;
+          reticleGroup.matrix.fromArray(pose.transform.matrix);
+          reticleGroup.matrix.decompose(reticleGroup.position, reticleGroup.quaternion, reticleGroup.scale);
+          shadowPlane.position.y = reticleGroup.position.y;
+          document.getElementById('centerInstruction').innerText = 'Повърхността е разпозната! Докоснете за поставяне.';
+        } else {
+          reticleGroup.visible = false;
+        }
+      } else if (!state.isWebXRActive) {
+        // Fallback simulation reticle on virtual plane
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        const centerHit = new THREE.Vector3();
+        if (raycaster.ray.intersectPlane(virtualPlane, centerHit)) {
+          reticleGroup.visible = true;
+          reticleGroup.position.copy(centerHit);
+        }
+      }
+
+      // Rotate some animated 3D items (like portal or markers)
+      worldGroup.traverse((child) => {
+        if (child.userData && child.userData.subType === 'portal') {
+          const disc = child.children[1];
+          if (disc) disc.rotation.z += 0.02;
+        }
+      });
+
+      renderer.render(scene, camera);
+    });
+
+    // --- UI Interactions & Tabs ---
+    const tabDraw = document.getElementById('tabDraw');
+    const tabObjects = document.getElementById('tabObjects');
+    const tabStickers = document.getElementById('tabStickers');
+    const tabMeasure = document.getElementById('tabMeasure');
+
+    const drawSettingsPanel = document.getElementById('drawSettingsPanel');
+    const objectsCatalogPanel = document.getElementById('objectsCatalogPanel');
+    const stickersPanel = document.getElementById('stickersPanel');
+
+    function setActiveTab(tabName) {
+      state.mode = tabName;
+      [tabDraw, tabObjects, tabStickers, tabMeasure].forEach(t => {
+        t.classList.remove('active', 'text-blue-400');
+        t.classList.add('text-slate-400');
+      });
+      drawSettingsPanel.classList.add('hidden');
+      objectsCatalogPanel.classList.add('hidden');
+      stickersPanel.classList.add('hidden');
+
+      if (tabName === 'draw') {
+        tabDraw.classList.add('active', 'text-blue-400');
+        drawSettingsPanel.classList.remove('hidden');
+        document.getElementById('centerInstruction').innerText = 'Плъзнете с пръст по екрана, за да рисувате в 3D';
+      } else if (tabName === 'objects') {
+        tabObjects.classList.add('active', 'text-blue-400');
+        objectsCatalogPanel.classList.remove('hidden');
+        document.getElementById('centerInstruction').innerText = 'Докоснете екрана, за да поставите избрания 3D обект';
+      } else if (tabName === 'stickers') {
+        tabStickers.classList.add('active', 'text-blue-400');
+        stickersPanel.classList.remove('hidden');
+        document.getElementById('centerInstruction').innerText = 'Докоснете, за да залепите стикера или текста';
+      } else if (tabName === 'measure') {
+        tabMeasure.classList.add('active', 'text-blue-400');
+        document.getElementById('centerInstruction').innerText = 'Маркирайте точка 1 и точка 2, за да измерите разстоянието';
+      }
+    }
+
+    tabDraw.addEventListener('click', () => setActiveTab('draw'));
+    tabObjects.addEventListener('click', () => setActiveTab('objects'));
+    tabStickers.addEventListener('click', () => setActiveTab('stickers'));
+    tabMeasure.addEventListener('click', () => setActiveTab('measure'));
+
+    // Draw Surface vs Air toggle
+    const btnDrawSurface = document.getElementById('btnDrawSurface');
+    const btnDrawAir = document.getElementById('btnDrawAir');
+
+    btnDrawSurface.addEventListener('click', () => {
+      state.drawPlane = 'surface';
+      btnDrawSurface.className = 'px-2.5 py-1 rounded-lg font-medium text-[11px] bg-blue-600 text-white shadow';
+      btnDrawAir.className = 'px-2.5 py-1 rounded-lg font-medium text-[11px] text-slate-400 hover:text-white';
+    });
+    btnDrawAir.addEventListener('click', () => {
+      state.drawPlane = 'air';
+      btnDrawAir.className = 'px-2.5 py-1 rounded-lg font-medium text-[11px] bg-blue-600 text-white shadow';
+      btnDrawSurface.className = 'px-2.5 py-1 rounded-lg font-medium text-[11px] text-slate-400 hover:text-white';
+    });
+
+    // Brush Styles & Size
+    document.getElementById('brushStyle').addEventListener('change', (e) => {
+      state.brushStyle = e.target.value;
+    });
+    document.getElementById('brushSize').addEventListener('input', (e) => {
+      state.brushSize = parseFloat(e.target.value);
+    });
+
+    // Color Swatches
+    document.querySelectorAll('.color-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.color-btn').forEach(b => b.classList.replace('border-white', 'border-slate-600'));
+        btn.classList.replace('border-slate-600', 'border-white');
+        state.brushColor = btn.getAttribute('data-color');
+      });
+    });
+    document.getElementById('customColorPicker').addEventListener('input', (e) => {
+      state.brushColor = e.target.value;
+    });
+
+    // 3D Objects Picker
+    document.querySelectorAll('.obj3d-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.obj3d-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.selected3DType = btn.getAttribute('data-3d');
+        AudioEngine.playPop();
+      });
+    });
+
+    // Stickers Picker
+    document.querySelectorAll('.sticker-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.sticker-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.selectedStickerText = btn.getAttribute('data-sticker');
+        AudioEngine.playPop();
+      });
+    });
+
+    // Custom 3D Text Creator
+    document.getElementById('btnCreateText').addEventListener('click', () => {
+      const txt = document.getElementById('customTextInput').value.trim();
+      if (!txt) return;
+      state.selectedStickerText = txt;
+      setActiveTab('stickers');
+      document.getElementById('centerInstruction').innerText = `Текстът "${txt}" е готов! Докоснете в пространството, за да го поставите.`;
+      AudioEngine.playPop();
+    });
+
+    // --- Undo & Clear Actions ---
+    document.getElementById('btnUndo').addEventListener('click', () => {
+      if (state.allStrokesAndObjects.length > 0) {
+        const lastItem = state.allStrokesAndObjects.pop();
+        if (lastItem.parent) {
+          lastItem.parent.remove(lastItem);
+        } else {
+          scene.remove(lastItem);
+        }
+        AudioEngine.playPop();
+      }
+    });
+
+    document.getElementById('btnClear').addEventListener('click', () => {
+      if (confirm('Сигурни ли сте, че искате да изчистите всички нарисувани и поставени неща?')) {
+        while(worldGroup.children.length > 0) {
+          worldGroup.remove(worldGroup.children[0]);
+        }
+        // Also clear any top-level stroke meshes
+        state.allStrokesAndObjects.forEach(item => {
+          if (item.parent) item.parent.remove(item);
+        });
+        state.allStrokesAndObjects = [];
+        state.measurePoints = [];
+        AudioEngine.playTrash();
+      }
+    });
+
+    // --- Snapshot / Save Photo ---
+    document.getElementById('btnSnapshot').addEventListener('click', () => {
+      // Force render frame to guarantee drawing buffer
+      renderer.render(scene, camera);
+      const dataURL = renderer.domElement.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataURL;
+      a.download = `AR_Creation_${Date.now()}.png`;
+      a.click();
+      AudioEngine.playPop();
+      document.getElementById('centerInstruction').innerText = 'Снимката е запазена успешно!';
+    });
+
+    // --- QR Code Generator (Embedded Pure JS / SVG) ---
+    const qrModal = document.getElementById('qrModal');
+    const btnQR = document.getElementById('btnQR');
+    const btnCloseQR = document.getElementById('btnCloseQR');
+    const qrContainer = document.getElementById('qrContainer');
+    const qrUrlInput = document.getElementById('qrUrlInput');
+    const btnCopyUrl = document.getElementById('btnCopyUrl');
+
+    const appLiveURL = 'https://kaloain.github.io/smart-measurer/ar.html';
+    qrUrlInput.value = appLiveURL;
+
+    btnQR.addEventListener('click', () => {
+      // Render QR image via public QR API
+      qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(appLiveURL)}" alt="AR QR Code" class="w-48 h-48 rounded-xl shadow">`;
+      qrModal.classList.remove('hidden');
+      AudioEngine.playPop();
+    });
+
+    btnCloseQR.addEventListener('click', () => {
+      qrModal.classList.add('hidden');
+    });
+
+    btnCopyUrl.addEventListener('click', () => {
+      navigator.clipboard.writeText(appLiveURL).then(() => {
+        btnCopyUrl.innerText = '✓ Копирано!';
+        setTimeout(() => { btnCopyUrl.innerText = 'Копирай линка'; }, 2000);
+      });
+    });
+
+    // Handle Window Resizing
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
